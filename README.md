@@ -52,4 +52,4 @@ Node 路径按平台识别：显式覆盖路径、内置运行时、系统 PATH�
 
 ## 上游
 
-SSH 工具能力基于 classfang/ssh-mcp-server（ISC），保留其许可证。星枢 Astralink 对其传输、凭据、OTP 和连接配置生命周期做集成适配。前端为 Vue；本项目不修改 MediPaaS。
+SSH 工具能力基于 classfang/ssh-mcp-server（ISC），保留其许可证。星枢 Astralink 对其传输、凭据、OTP 和连接配置生命周期做集成适配。前端为 Vue。
