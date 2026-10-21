@@ -2,6 +2,15 @@ name: Build desktop packages
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing v* tag to publish (requires artifact_run_id)'
+        required: false
+        type: string
+      artifact_run_id:
+        description: 'Successful build run ID to publish (requires release_tag)'
+        required: false
+        type: string
   push:
     tags:
       - 'v*'
@@ -15,6 +24,7 @@ concurrency:
 
 jobs:
   package:
+    if: ${{ inputs.artifact_run_id == '' && inputs.release_tag == '' }}
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -89,3 +99,85 @@ jobs:
           path: ${{ matrix.files }}
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    name: Publish release
+    needs: package
+    if: >-
+      ${{ always() &&
+          ((github.event_name == 'push' && needs.package.result == 'success') ||
+           (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.release_tag != '')) }}
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release source
+        env:
+          BUILD_RESULT: ${{ needs.package.result }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo 'Release tag must be a version starting with v.' >&2
+            exit 1
+          fi
+          if [[ ! "$ARTIFACT_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo 'Artifact run ID must be numeric.' >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          tag_sha=$(git rev-parse --verify 'FETCH_HEAD^{commit}')
+          if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+            if [[ "$GITHUB_REF" != "refs/tags/$RELEASE_TAG" || "$tag_sha" != "$GITHUB_SHA" || "$BUILD_RESULT" != 'success' ]]; then
+              echo 'Tag or package result does not match this run.' >&2
+              exit 1
+            fi
+          else
+            if [[ "$ARTIFACT_RUN_ID" == "$GITHUB_RUN_ID" ]]; then
+              echo 'Manual publishing requires a previous build run ID.' >&2
+              exit 1
+            fi
+            run_info=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" --jq '[.head_sha, .status, .conclusion, .event, .head_branch, .path] | @tsv')
+            IFS=$'\t' read -r run_sha status conclusion event branch path <<< "$run_info"
+            if [[ "$run_sha" != "$tag_sha" || "$status" != 'completed' || "$conclusion" != 'success' || "$event" != 'push' || "$branch" != "$RELEASE_TAG" || "$path" != '.github/workflows/build-desktop.yml' ]]; then
+              echo 'Build run must be a successful tag build of this exact commit.' >&2
+              exit 1
+            fi
+          fi
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to replace its assets.' >&2
+            exit 1
+          fi
+      - name: Download platform packages
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ env.ARTIFACT_RUN_ID }}
+          github-token: ${{ github.token }}
+          pattern: Astralink-*
+          path: artifacts
+      - name: Check packages and publish
+        run: |
+          shopt -s nullglob
+          windows=(artifacts/Astralink-windows-x64/*.exe)
+          mac_arm=(artifacts/Astralink-macos-arm64/*.dmg)
+          mac_x64=(artifacts/Astralink-macos-x64/*.dmg)
+          deb=(artifacts/Astralink-linux-x64/*.deb)
+          appimage=(artifacts/Astralink-linux-x64/*.AppImage)
+          if (( ${#windows[@]} != 1 || ${#mac_arm[@]} != 1 || ${#mac_x64[@]} != 1 || ${#deb[@]} != 1 || ${#appimage[@]} != 1 )); then
+            echo 'Expected one installer per platform and format.' >&2
+            exit 1
+          fi
+          files=("${windows[@]}" "${mac_arm[@]}" "${mac_x64[@]}" "${deb[@]}" "${appimage[@]}")
+          for file in "${files[@]}"; do
+            test -s "$file"
+          done
+          if (( $(printf '%s\n' "${files[@]}" | xargs -n1 basename | sort -u | wc -l) != 5 )); then
+            echo 'Release asset filenames must be distinct.' >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "Astralink $RELEASE_TAG"

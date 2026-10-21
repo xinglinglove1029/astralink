@@ -4,7 +4,7 @@ Astralink 使用各平台的原生构建环境，安装包包含对应操作系�
 
 ## GitHub Actions
 
-提交项目到 GitHub 后，打开 **Actions → Build desktop packages → Run workflow**，选择分支运行。推送 `v*` 标签也会自动触发。工作流只上传构建产物，不自动发布 Release。
+提交项目到 GitHub 后，打开 **Actions → Build desktop packages → Run workflow**，选择分支运行，仅生成临时构建产物。推送 `v*` 版本标签会在所有平台构建成功后自动创建 Release，并附上各平台安装包；任一平台失败则不发布。发布任务只拥有所需的 Actions 读取与仓库内容写入权限。
 
 | 构建任务 | 原生 runner | 产物 |
 | --- | --- | --- |
@@ -13,7 +13,9 @@ Astralink 使用各平台的原生构建环境，安装包包含对应操作系�
 | macOS Intel | macos-15-intel | x64 `.dmg` |
 | Linux x64 | ubuntu-22.04 | `.deb`、`.AppImage` |
 
-成功后在运行记录的 **Artifacts** 下载 `Astralink-windows-x64`、`Astralink-macos-arm64`、`Astralink-macos-x64`、`Astralink-linux-x64`。每个任务单独运行前端、引擎及 Rust 测试，再构建并启动资源目录中的内置 Node/引擎做控制接口验证。资源包含的是对应原生 runner 的 Node，禁止从 Windows 复制 `node.exe` 到 Linux/macOS 包。
+成功后可以在运行记录的 **Artifacts** 下载 `Astralink-windows-x64`、`Astralink-macos-arm64`、`Astralink-macos-x64`、`Astralink-linux-x64`，这些临时产物保留 14 天；版本标签的安装包也会出现在 **Releases**。每个任务单独运行前端、引擎及 Rust 测试，再构建并启动资源目录中的内置 Node/引擎做控制接口验证。资源包含的是对应原生 runner 的 Node，禁止从 Windows 复制 `node.exe` 到 Linux/macOS 包。
+
+要补发已完成但未发布的旧版本，在默认分支手动运行此工作流，同时填写 `release_tag`（如 `v0.1.0`）和 `artifact_run_id`（对应成功的标签构建运行 ID）。该模式不重新打包，会检查运行状态、来源和提交与标签一致，再从尚未过期的 Artifacts 发布；不会移动标签或覆盖已有 Release。两个输入都留空时仍只运行构建。
 
 macOS 当前使用 ad-hoc 签名，不需要配置 Apple 证书，但没有完成 Apple 公证；公开分发时仍可能遇到 Gatekeeper 提示。未来配置 Developer ID 证书与公证后，再覆盖 `signingIdentity` 和增加 Apple secrets。构建能力不等于各平台已完成桌面功能验收。
 
