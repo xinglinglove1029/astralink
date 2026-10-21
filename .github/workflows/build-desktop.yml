@@ -161,12 +161,15 @@ jobs:
           path: artifacts
       - name: Check packages and publish
         run: |
-          shopt -s nullglob
-          windows=(artifacts/Astralink-windows-x64/*.exe)
-          mac_arm=(artifacts/Astralink-macos-arm64/*.dmg)
-          mac_x64=(artifacts/Astralink-macos-x64/*.dmg)
-          deb=(artifacts/Astralink-linux-x64/*.deb)
-          appimage=(artifacts/Astralink-linux-x64/*.AppImage)
+          find artifacts -type f -print
+          for platform in windows-x64 macos-arm64 macos-x64 linux-x64; do
+            test -d "artifacts/Astralink-$platform"
+          done
+          mapfile -d '' windows < <(find artifacts/Astralink-windows-x64 -type f -name '*.exe' -print0)
+          mapfile -d '' mac_arm < <(find artifacts/Astralink-macos-arm64 -type f -name '*.dmg' -print0)
+          mapfile -d '' mac_x64 < <(find artifacts/Astralink-macos-x64 -type f -name '*.dmg' -print0)
+          mapfile -d '' deb < <(find artifacts/Astralink-linux-x64 -type f -name '*.deb' -print0)
+          mapfile -d '' appimage < <(find artifacts/Astralink-linux-x64 -type f -name '*.AppImage' -print0)
           if (( ${#windows[@]} != 1 || ${#mac_arm[@]} != 1 || ${#mac_x64[@]} != 1 || ${#deb[@]} != 1 || ${#appimage[@]} != 1 )); then
             echo 'Expected one installer per platform and format.' >&2
             exit 1
