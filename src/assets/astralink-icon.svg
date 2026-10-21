@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="tile" x1="74" y1="32" x2="432" y2="488" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173e50"/>
+      <stop offset="0.55" stop-color="#102a3b"/>
+      <stop offset="1" stop-color="#0b1c2d"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="96" y1="24" x2="400" y2="488" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#72b7b5" stop-opacity="0.5"/>
+      <stop offset="0.5" stop-color="#47777e" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#234353" stop-opacity="0.4"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#tile)"/>
+  <rect x="25.5" y="25.5" width="461" height="461" rx="110.5" stroke="url(#edge)" stroke-width="3"/>
+  <g transform="translate(32 32) scale(7)">
+  <defs>
+    <linearGradient id="orbit" x1="10" y1="50" x2="53" y2="15" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#37b7b0"/>
+      <stop offset="1" stop-color="#a0f5d6"/>
+    </linearGradient>
+    <linearGradient id="star" x1="24" y1="13" x2="40" y2="51" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f1fff9"/>
+      <stop offset="1" stop-color="#9debdc"/>
+    </linearGradient>
+  </defs>
+  <!-- One orbit joins the remote nodes around a single central hub. -->
+  <ellipse cx="32" cy="32" rx="25" ry="10.5" transform="rotate(-36 32 32)" stroke="url(#orbit)" stroke-width="3.2"/>
+  <path d="M32 11C34.5 25 38 28.5 47 32C38 35.5 34.5 39 32 53C29.5 39 26 35.5 17 32C26 28.5 29.5 25 32 11Z" fill="url(#star)"/>
+  <circle cx="52.23" cy="17.31" r="3.8" fill="#b5ffe3"/>
+  <circle cx="11.77" cy="46.69" r="2.4" fill="#55cfc0"/>
+  </g>
+</svg>

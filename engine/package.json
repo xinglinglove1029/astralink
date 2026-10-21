@@ -1,0 +1,15 @@
+{
+  "name": "@astralink/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@fangjunjie/ssh-mcp-server": "1.10.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "ssh2": "1.17.0"
+  }
+}

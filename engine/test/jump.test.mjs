@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { feature, profile, tokens, request, fakeSsh, eventually } from './helpers.mjs';
+test('resolved jumpHostId opens a real SSH forwarded channel and reaches the target', async (t) => {
+  const target = await fakeSsh({ password: 'target-pass' });
+  const jump = await fakeSsh({ password: 'jump-pass', allowForwarding: true });
+  t.after(() => target.close());
+  t.after(() => jump.close());
+  const { createEngine } = await feature('engine');
+  const engine = await createEngine({ ...tokens, port: 0 });
+  t.after(() => engine.close());
+  const gateway = profile({ name: 'gateway', port: jump.port, password: 'jump-pass', tryKeyboard: false });
+  const asset = profile({ id: '22222222-2222-4222-8222-222222222222', name: 'asset', port: target.port, password: 'target-pass', tryKeyboard: false, jumpHostId: gateway.id });
+  assert.equal((await request(engine, '/control/profiles', { profiles: [gateway, asset] })).status, 200);
+  assert.equal((await request(engine, '/control/test', { profileId: asset.id })).body.status, 'connected');
+  assert.equal(jump.seen.connections, 1);
+  assert.equal(target.seen.connections, 1);
+  assert.deepEqual(target.seen.commands, ['hostname && id']);
+  assert.deepEqual(jump.seen.commands, []);
+  assert.equal((await request(engine, '/control/profiles', { profiles: [asset] })).status, 400);
+  assert.equal(target.seen.disconnected, 0);
+  await request(engine, '/control/profiles', { profiles: [gateway] });
+  await eventually(() => target.seen.disconnected === 1);
+  assert.equal(jump.seen.disconnected, 0);
+});
+test('JumpServer target username is sent on the SSH wire', async (t) => {
+  const ssh = await fakeSsh({ password: 'platform-pass' });
+  t.after(() => ssh.close());
+  const { createEngine } = await feature('engine');
+  const engine = await createEngine({ ...tokens, port: 0 });
+  t.after(() => engine.close());
+  const p = profile({ port: ssh.port, password: 'platform-pass', tryKeyboard: false, username: 'platform', targetHost: 'asset', targetUsername: 'root' });
+  await request(engine, '/control/profiles', { profiles: [p] });
+  assert.equal((await request(engine, '/control/test', { profileId: p.id })).body.status, 'connected');
+  assert.ok(ssh.seen.usernames.every(name => name === 'platform@root@asset'));
+});
+test('multiple unknown auth prompts are rejected explicitly rather than guessed', async (t) => {
+  const { AuthQueue } = await feature('auth');
+  const auth = new AuthQueue();
+  await assert.rejects(auth.challenge(profile(), '', [{ prompt: 'First code', echo: false }, { prompt: 'Second code', echo: false }]), { code: 'AUTH_PROMPTS_UNSUPPORTED' });
+  assert.equal(auth.events(0).cursor, 0);
+  auth.close();
+});

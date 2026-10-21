@@ -1,0 +1,37 @@
+{
+  "name": "astralink",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "engine"
+  ],
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vue-tsc --noEmit && vite build",
+    "test": "vitest run",
+    "tauri": "node scripts/tauri.mjs",
+    "desktop": "node scripts/tauri.mjs dev",
+    "desktop:build": "npm run resources && node scripts/tauri.mjs build",
+    "mcp": "node engine/src/main.mjs",
+    "resources": "node scripts/prepare-resources.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.3",
+    "@tauri-apps/plugin-dialog": "2.8.2",
+    "@zxing/browser": "0.2.1",
+    "vue": "3.5.44"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.2",
+    "@types/node": "^24",
+    "@vitejs/plugin-vue": "6.0.10",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.4",
+    "vue-tsc": "3.3.13"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": "1.32.1"
+  }
+}

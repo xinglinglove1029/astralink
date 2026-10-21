@@ -1,0 +1,37 @@
+<script setup lang="ts">
+defineProps<{ name: string; size?: number }>()
+const paths: Record<string, string> = {
+  server: 'M4 3h16v7H4z M4 14h16v7H4z M7 6.5h.01 M7 17.5h.01 M11 6.5h6 M11 17.5h6',
+  grid: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
+  download: 'M12 3v12 M7 10l5 5 5-5 M4 16v5h16v-5',
+  settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 3h4l1 3 3 1 3 2-2 3 2 3-3 2-3 1-1 3h-4l-1-3-3-1-3-2 2-3-2-3 3-2 3-1z',
+  search: 'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15 M16 16l5 5',
+  plus: 'M12 5v14 M5 12h14',
+  arrow: 'M5 12h14 M14 7l5 5-5 5',
+  chevron: 'M9 5l7 7-7 7',
+  chevronDown: 'M6 9l6 6 6-6',
+  close: 'M6 6l12 12 M6 18L18 6',
+  check: 'M5 12l4 4L19 6',
+  play: 'M8 4l12 8-12 8z',
+  stop: 'M6 6h12v12H6z',
+  refresh: 'M20 7v5h-5 M4 17v-5h5 M5.5 7A8 8 0 0 1 19 6l1 6 M4 12l1 6a8 8 0 0 0 13.5-1',
+  folder: 'M3 6h7l2 3h9v11H3z',
+  key: 'M8 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10 M12 12l9 9 M16 16l3-3 M19 19l3-3',
+  shield: 'M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z M8 12l3 3 5-6',
+  edit: 'M15 4l5 5 M3 21l5-1L21 7l-4-4L4 16z',
+  trash: 'M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7',
+  globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M3 12h18 M12 3c-5 5-5 13 0 18 M12 3c5 5 5 13 0 18',
+  link: 'M10 14l4-4 M8 16l-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M16 8l2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0',
+  terminal: 'M3 4h18v16H3z M6 8l4 4-4 4 M13 16h5',
+  info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 11v6 M12 7h.01',
+  alert: 'M12 3L2 21h20z M12 9v5 M12 17h.01',
+  clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',
+  scan: 'M4 8V4h4 M16 4h4v4 M20 16v4h-4 M8 20H4v-4 M8 12h8 M12 8v8',
+  eye: 'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6 M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6',
+  eyeOff: 'M3 3l18 18 M10.6 10.6a2 2 0 0 0 2.8 2.8 M9.9 5.2A11.4 11.4 0 0 1 12 5c6.5 0 10 7 10 7a15.6 15.6 0 0 1-3 3.8 M6.2 6.2C3.5 8.1 2 12 2 12s3.5 7 10 7c1.2 0 2.3-.2 3.3-.7',
+  copy: 'M8 8h13v13H8z M16 8V3H3v13h5',
+  monitor: 'M3 4h18v13H3z M12 17v4 M8 21h8',
+  logs: 'M5 3h10l4 4v14H5z M14 3v5h5 M8 11h8 M8 15h8 M8 18h5',
+}
+</script>
+<template><svg :width="size || 18" :height="size || 18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="paths[name] || paths.server" /></svg></template>
