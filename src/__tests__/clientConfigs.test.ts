@@ -5,12 +5,22 @@ describe('MCP client connection guides', () => {
   it('covers the reference clients without claiming unsupported clients are ready', () => {
     expect(clientGuides.map((guide) => guide.id)).toEqual([
       'claude-code', 'codex', 'cursor', 'vscode', 'windsurf', 'antigravity',
-      'opencode', 'openclaw', 'hermes', 'claude-desktop', 'chatgpt',
+      'opencode', 'openclaw', 'hermes', 'claude-desktop', 'chatgpt', 'workbuddy', 'cherry-studio',
     ])
     expect(clientGuides.filter((guide) => !guide.supported).map((guide) => guide.id))
-      .toEqual(['claude-desktop', 'chatgpt'])
+      .toEqual(['chatgpt'])
     expect(createClientSnippet('chatgpt', 18766)).toBeNull()
-    expect(createClientSnippet('claude-desktop', 18766)).toBeNull()
+    expect(JSON.parse(createClientSnippet('claude-desktop', 18766)!).mcpServers.astralink.env.ASTRALINK_MCP_PORT).toBe('18766')
+    expect(JSON.parse(createClientSnippet('workbuddy', 18766)!).mcpServers.astralink.env.ASTRALINK_MCP_PORT).toBe('18766')
+    expect(clientGuides.find((guide) => guide.id === 'cherry-studio')?.quickSetup).toBe(false)
+    const cherry = JSON.parse(createClientSnippet('cherry-studio', 18766)!).mcpServers.astralink
+    expect(cherry.command).toBe('<ASTRALINK_NODE_PATH>')
+    expect(cherry.args).toEqual(['<ASTRALINK_BRIDGE_PATH>'])
+    expect(cherry.env.ASTRALINK_MCP_TOKEN).toBe('<ASTRALINK_MCP_TOKEN>')
+    const resolved = JSON.parse(createClientSnippet('cherry-studio', 18766, { nodePath: 'C:/Astralink/node.exe', scriptPath: 'C:/Astralink/stdio-bridge.mjs' })!).mcpServers.astralink
+    expect(resolved.command).toBe('C:/Astralink/node.exe')
+    expect(resolved.args).toEqual(['C:/Astralink/stdio-bridge.mjs'])
+    expect(resolved.env.ASTRALINK_MCP_TOKEN).toBe('<ASTRALINK_MCP_TOKEN>')
   })
 
   it('uses the configured loopback endpoint and only a token placeholder', () => {

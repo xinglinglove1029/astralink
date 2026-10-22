@@ -9,7 +9,7 @@ export function connectionResultLabel(status: ConnectionTest['status']): string 
   }
 }
 
-export const sourceLabels: Record<SourceKind, string> = { xshell: 'Xshell', tabby: 'Tabby', netcatty: 'Netcatty', 'mcp-json': 'MCP JSON', openssh: 'OpenSSH' }
+export const sourceLabels: Record<SourceKind, string> = { xshell: 'Xshell', tabby: 'Tabby', netcatty: 'Netcatty', 'mcp-json': 'MCP JSON', openssh: 'OpenSSH', finalshell: 'FinalShell', nyaterm: 'NyaTerm', mobaxterm: 'MobaXterm', securecrt: 'SecureCRT', electerm: 'Electerm', windterm: 'WindTerm', termius: 'Termius', 'nya-backup': 'NyaTerm 备份' }
 export const authLabels = { password: '密码', privateKey: '私钥', agent: 'SSH Agent' }
 export function createProfile(): ConnectionProfile {
   return { id: crypto.randomUUID(), name: '', host: '', port: 22, username: '', group: '', source: 'manual', authType: 'password', hasPassword: false, hasPassphrase: false, hasTotpSecret: false, transportMode: 'exec', tryKeyboard: false, enabled: true, notes: '' }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { desktopBridge } from '../api'
 import { clientGuides, copyAccessToken, createClientSnippet, mcpEndpoint } from '../clientConfigs'
 import type { ClientId } from '../clientConfigs'
@@ -10,7 +10,13 @@ const props = defineProps<{ dock: AstralinkController }>()
 const { state } = props.dock
 const selected = ref<ClientId>('claude-code')
 const guide = computed(() => clientGuides.find((item) => item.id === selected.value)!)
-const snippet = computed(() => createClientSnippet(selected.value, state.settings.mcpPort))
+const bridgePaths = ref<{ nodePath: string; scriptPath: string }>()
+watch(() => state.desktop && state.ready, async (ready) => {
+  if (!ready) { bridgePaths.value = undefined; return }
+  try { bridgePaths.value = await desktopBridge.invoke('get_mcp_bridge_paths', {}) }
+  catch { bridgePaths.value = undefined }
+}, { immediate: true })
+const snippet = computed(() => createClientSnippet(selected.value, state.settings.mcpPort, bridgePaths.value))
 const endpoint = computed(() => mcpEndpoint(state.settings.mcpPort))
 const registration = computed(() => state.clientRegistrations[selected.value])
 const setupBusy = computed(() => !state.desktop || !state.ready || !state.engine.running || state.engineBusy || state.registrationBusy || !!state.mutation)
@@ -68,14 +74,14 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
       <button v-for="item in clientGuides" :id="'client-tab-' + item.id" :key="item.id" type="button" role="tab"
         :aria-selected="selected === item.id" :tabindex="selected === item.id ? 0 : -1"
         aria-controls="client-config-panel" :class="{ selected: selected === item.id }" @click="selected = item.id">
-        {{ item.name }}<span v-if="!item.supported" class="client-tab-limited" title="当前本机服务不能直接接入">待适配</span>
+        {{ item.name }}<span v-if="!item.supported" class="client-tab-limited" title="需要公网 HTTPS 网关">需远程网关</span>
       </button>
     </div>
     <div id="client-config-panel" class="client-panel" role="tabpanel" :aria-labelledby="'client-tab-' + selected">
       <div class="client-panel-heading"><div><strong>{{ guide.name }}</strong><span class="client-location mono">{{ guide.location }}</span></div>
         <button v-if="snippet" type="button" class="button secondary" aria-label="复制配置片段" title="复制配置片段" @click="copySnippet"><Icon name="copy" :size="15" />复制配置</button>
       </div>
-      <div v-if="guide.supported" class="client-quick-setup">
+      <div v-if="guide.supported && guide.quickSetup !== false" class="client-quick-setup">
         <div class="client-quick-heading"><strong>快捷配置</strong><span>保留其他 MCP 条目，写入前自动备份。</span></div>
         <div class="button-row"><button type="button" class="button primary" :disabled="setupBusy" @click="configure()"><span v-if="state.registrationBusy" class="spinner" /><Icon v-else name="link" :size="15" />{{ selected === 'windsurf' ? '选择配置并接入' : '一键接入 ' + guide.name }}</button><button v-if="selected !== 'windsurf'" type="button" class="button secondary" :disabled="setupBusy" @click="configure(true)">选择其他配置文件</button></div>
         <p v-if="!state.engine.running">请先在服务器页面启动 MCP 服务。</p>
@@ -84,7 +90,7 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
       </div>
       <ol class="client-steps"><li v-for="step in guide.steps" :key="step">{{ step }}</li></ol>
       <div v-if="snippet" class="client-code-wrap"><pre class="client-code mono"><code>{{ snippet }}</code></pre></div>
-      <div v-else class="client-unavailable"><Icon name="info" :size="18" /><span>当前不提供直接接入本机服务的配置。</span></div>
+      <div v-else class="client-unavailable"><Icon name="info" :size="18" /><span>本机服务不能直接连接云端 ChatGPT。</span></div>
       <p v-if="guide.caution" class="client-caution"><Icon name="alert" :size="15" />{{ guide.caution }}</p>
       <div class="client-verify"><Icon name="check" :size="15" /><span>{{ guide.verify }}</span></div>
     </div>

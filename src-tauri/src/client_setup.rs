@@ -8,6 +8,16 @@ use std::{
 pub fn default_path(client: &str, home: &Path, roaming: Option<&Path>) -> Result<PathBuf, String> {
     let path = match client {
         "claude-code" => home.join(".claude.json"),
+        "workbuddy" => home.join(".workbuddy/mcp.json"),
+        "claude-desktop" if cfg!(target_os = "macos") => {
+            home.join("Library/Application Support/Claude/claude_desktop_config.json")
+        }
+        "claude-desktop" if cfg!(target_os = "linux") => {
+            home.join(".config/Claude/claude_desktop_config.json")
+        }
+        "claude-desktop" => roaming
+            .ok_or("无法定位 Claude Desktop 配置，请选择配置文件")?
+            .join("Claude/claude_desktop_config.json"),
         "cursor" => home.join(".cursor/mcp.json"),
         "vscode" if cfg!(target_os = "macos") => {
             home.join("Library/Application Support/Code/User/mcp.json")
@@ -68,6 +78,16 @@ pub fn register(
     port: u16,
     token: &str,
 ) -> Result<CodexRegistration, String> {
+    register_with_bridge(client, path, port, token, None)
+}
+
+pub fn register_with_bridge(
+    client: &str,
+    path: &Path,
+    port: u16,
+    token: &str,
+    bridge: Option<(&Path, &Path)>,
+) -> Result<CodexRegistration, String> {
     if port == 0 || token.is_empty() || token.len() > 4096 || token.chars().any(char::is_control) {
         return Err("MCP 端口或访问令牌无效".into());
     }
@@ -75,7 +95,9 @@ pub fn register(
         return config_sync::register(path, port, token);
     }
     let keys: &[&str] = match client {
-        "claude-code" | "cursor" | "windsurf" | "antigravity" => &["mcpServers"],
+        "claude-code" | "claude-desktop" | "workbuddy" | "cursor" | "windsurf" | "antigravity" => {
+            &["mcpServers"]
+        }
         "vscode" => &["servers"],
         "opencode" => &["mcp"],
         "openclaw" => &["mcp", "servers"],
@@ -99,6 +121,15 @@ pub fn register(
     let url = format!("http://127.0.0.1:{port}/mcp");
     let headers = json!({"Authorization": format!("Bearer {token}")});
     let astralink = match client {
+        "claude-desktop" | "workbuddy" => {
+            let (node, script) = bridge.ok_or("本机 MCP 桥接资源不存在")?;
+            if !node.is_file() || !script.is_file() {
+                return Err("本机 MCP 桥接资源不存在，请检查安装包".into());
+            }
+            json!({"command": node, "args": [script], "env": {
+                "ASTRALINK_MCP_PORT": port.to_string(), "ASTRALINK_MCP_TOKEN": token
+            }})
+        }
         "claude-code" | "vscode" => json!({"type": "http", "url": url, "headers": headers}),
         "windsurf" | "antigravity" => json!({"serverUrl": url, "headers": headers}),
         "opencode" => {

@@ -13,10 +13,19 @@ const selected = ref<string[]>([])
 const acknowledge = ref(false)
 const picking = ref(false)
 const localError = ref('')
+const importPassword = ref('')
 let active = true
 let pickRevision = 0
 const sources: { kind: SourceKind; note: string; icon: string }[] = [
   { kind: 'xshell', note: '目录 / .xsh / .xts', icon: 'terminal' },
+  { kind: 'finalshell', note: 'conn 目录 / JSON', icon: 'terminal' },
+  { kind: 'nyaterm', note: '本机 .redb / v1 JSON', icon: 'terminal' },
+  { kind: 'mobaxterm', note: '.mxtsessions', icon: 'terminal' },
+  { kind: 'windterm', note: 'user.sessions', icon: 'terminal' },
+  { kind: 'securecrt', note: '导出 .xml', icon: 'terminal' },
+  { kind: 'electerm', note: '书签 .json', icon: 'terminal' },
+  { kind: 'termius', note: '本机 IndexedDB', icon: 'terminal' },
+  { kind: 'nya-backup', note: '.nya 加密备份', icon: 'terminal' },
   { kind: 'tabby', note: 'config.yaml', icon: 'terminal' },
   { kind: 'netcatty', note: 'CSV 导出文件', icon: 'server' },
   { kind: 'mcp-json', note: '已有 MCP JSON 配置', icon: 'link' },
@@ -33,6 +42,7 @@ function changeSource(source: SourceKind) {
   kind.value = source
   filePath.value = ''
   localError.value = ''
+  importPassword.value = ''
   pickRevision++
   props.dock.clearPreview()
 }
@@ -42,12 +52,17 @@ async function chooseFile(selection: 'file' | 'directory' = 'file') {
   picking.value = true
   localError.value = ''
   try {
-    const file = await props.dock.pickFile(selectedKind, selection)
-    if (active && revision === pickRevision && file) { filePath.value = file; await props.dock.previewImport(selectedKind, file) }
+    const file = await props.dock.pickFile(selectedKind, selectedKind === 'termius' ? 'directory' : selection)
+    if (active && revision === pickRevision && file) { filePath.value = file; await previewSource(selectedKind, file) }
   } catch { if (active) localError.value = '无法选择文件，请检查桌面文件权限' }
   finally { if (active) picking.value = false }
 }
-function useDetected(sourceKind: string, path: string) { changeSource(sourceKind as SourceKind); filePath.value = path; void props.dock.previewImport(kind.value, path) }
+async function previewSource(sourceKind: SourceKind, path: string) {
+  const secret = importPassword.value
+  const result = await props.dock.previewImport(sourceKind, path, secret)
+  if (result) importPassword.value = ''
+}
+function useDetected(sourceKind: string, path: string) { changeSource(sourceKind as SourceKind); filePath.value = path; void previewSource(kind.value, path) }
 function pathChanged() { pickRevision++; props.dock.clearPreview(); acknowledge.value = false }
 function toggleAll(event: Event) { selected.value = (event.target as HTMLInputElement).checked ? state.preview?.profiles.map((profile) => profile.id) ?? [] : [] }
 onUnmounted(() => { active = false; pickRevision++; props.dock.clearPreview() })
@@ -57,8 +72,9 @@ onUnmounted(() => { active = false; pickRevision++; props.dock.clearPreview() })
     <section class="card import-main">
       <div class="section-heading"><span class="step-number">1</span><div><h3>选择连接来源</h3><p>导入配置后，在星枢 Astralink 统一维护。</p></div></div>
       <div class="source-grid"><button v-for="source in sources" :key="source.kind" :class="['source-card', { active: kind === source.kind }]" :disabled="!!state.mutation || picking" @click="changeSource(source.kind)"><span class="source-logo"><Icon :name="source.icon" :size="22" /></span><strong>{{ sourceLabels[source.kind] }}</strong><small>{{ source.note }}</small><Icon v-if="kind === source.kind" name="check" :size="15" class="source-check" /></button></div>
-      <div class="file-drop"><span class="file-drop-icon"><Icon name="folder" :size="25" /></span><div><h4>选择 {{ sourceLabels[kind] }} 连接配置</h4><p>{{ kind === 'netcatty' ? '请先从 Netcatty 导出 CSV 文件。' : kind === 'xshell' ? '选择会话目录批量导入，或选择 .xsh 文件 / .xts 导出包。' : '通过本机文件选择器读取，不上传到云端。' }}</p></div><div class="file-picker-actions"><button v-if="kind === 'xshell'" class="button secondary" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @click="chooseFile('directory')"><Icon name="folder" :size="14" />选择目录</button><button class="button secondary" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @click="chooseFile('file')"><span v-if="picking" class="spinner" />{{ picking ? '选择中…' : '选择文件' }}</button></div></div>
-      <div class="path-row"><label class="sr-only" for="import-path">导入文件路径</label><input id="import-path" v-model="filePath" class="mono" placeholder="或输入本机配置路径" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @input="pathChanged" /><button class="button secondary" :disabled="!filePath.trim() || !state.desktop || !state.ready || state.previewBusy || !!state.mutation || picking" @click="dock.previewImport(kind, filePath)"><span v-if="state.previewBusy" class="spinner" />预览</button></div>
+      <div class="file-drop"><span class="file-drop-icon"><Icon name="folder" :size="25" /></span><div><h4>选择 {{ sourceLabels[kind] }} 连接配置</h4><p>{{ kind === 'netcatty' ? '请先从 Netcatty 导出 CSV 文件。' : kind === 'xshell' ? '选择会话目录批量导入，或选择 .xsh 文件 / .xts 导出包。' : kind === 'finalshell' ? '选择 FinalShell 的 conn 目录；加密密码需重新填写。' : kind === 'nyaterm' ? '选择本机 .redb 或 v1 JSON 配置；数据库凭据需补齐。' : kind === 'windterm' ? '选择 user.sessions；启用主密码时需输入后预览。' : kind === 'termius' ? '选择本机 IndexedDB 目录；读取当前系统凭据库中的 localKey。' : kind === 'nya-backup' ? '选择 .nya 加密备份并输入备份密码，仅提取 SSH 连接。' : '通过本机文件选择器读取，不上传到云端。' }}</p></div><div class="file-picker-actions"><button v-if="kind === 'xshell' || kind === 'finalshell'" class="button secondary" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @click="chooseFile('directory')"><Icon name="folder" :size="14" />选择目录</button><button class="button secondary" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @click="chooseFile('file')"><span v-if="picking" class="spinner" />{{ picking ? '选择中…' : kind === 'termius' ? '选择目录' : '选择文件' }}</button></div></div>
+      <div class="path-row"><label class="sr-only" for="import-path">导入文件路径</label><input id="import-path" v-model="filePath" class="mono" placeholder="或输入本机配置路径" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @input="pathChanged" /><button class="button secondary" :disabled="!filePath.trim() || !state.desktop || !state.ready || state.previewBusy || !!state.mutation || picking" @click="previewSource(kind, filePath)"><span v-if="state.previewBusy" class="spinner" />预览</button></div>
+      <label v-if="kind === 'windterm' || kind === 'nya-backup'" class="field"><span>{{ kind === 'windterm' ? 'WindTerm 主密码（如已启用）' : 'NyaTerm 备份密码' }}</span><input v-model="importPassword" type="password" autocomplete="off" :disabled="!state.desktop || !state.ready || state.previewBusy || !!state.mutation" /><small>仅用于本次预览，不保存密码。</small></label>
       <p v-if="localError" class="field-error" role="alert">{{ localError }}</p>
       <div class="import-divider" />
       <div class="section-heading"><span class="step-number">2</span><div><h3>检查并导入</h3><p>确认服务器、冲突与认证信息。</p></div><span v-if="state.preview" class="badge blue">{{ state.preview.stats.total }} 个连接</span></div>

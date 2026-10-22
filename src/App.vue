@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { desktopBridge } from './api'
+import { getVersion } from '@tauri-apps/api/app'
+import { openUrl } from '@tauri-apps/plugin-opener'
+import { checkLatestRelease, RELEASE_PAGE } from './updateCheck'
+import type { UpdateResult } from './updateCheck'
 import { createAstralink } from './controller'
 import { authLabels, filterProfiles, needsCredential, sourceLabels } from './domain'
 import type { ConnectionProfile, SourceKind } from './types'
@@ -28,6 +32,9 @@ const selectedId = ref('')
 const editor = ref<{ profile?: ConnectionProfile } | null>(null)
 const deleting = ref<ConnectionProfile[] | null>(null)
 const copied = ref(false)
+const updateResult = ref<UpdateResult | null>(null)
+const checkingUpdate = ref(false)
+const dismissedUpdate = ref(false)
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 const title = computed(() => page.value === 'dashboard' ? '连接总览' : page.value === 'import' ? '导入连接' : page.value === 'logs' ? '运行日志' : page.value === 'settings' ? '设置' : '服务器')
 const pageEnglish = computed(() => ({ dashboard:'Overview',servers:'Nodes',import:'Import',logs:'Activity',settings:'Settings' })[page.value]??'Workspace')
@@ -66,7 +73,27 @@ async function copyEndpoint() {
   try { await navigator.clipboard.writeText(state.engine.endpoint); copied.value = true; copyTimer = setTimeout(() => { copied.value = false }, 1800) }
   catch { dock.report('复制失败，请手动复制服务地址') }
 }
-onMounted(() => { if (state.desktop) void dock.initialize() })
+async function checkUpdates() {
+  if (!state.desktop || checkingUpdate.value) return
+  checkingUpdate.value = true
+  dismissedUpdate.value = false
+  try {
+    const currentVersion = await getVersion()
+    updateResult.value = await checkLatestRelease(currentVersion, navigator.userAgent)
+  } catch {
+    updateResult.value = { status: 'unavailable', currentVersion: '', reason: '无法读取安装版本' }
+  } finally { checkingUpdate.value = false }
+}
+async function openRelease() {
+  if (updateResult.value?.status !== 'available') return
+  try { await openUrl(RELEASE_PAGE) }
+  catch { dock.report('无法打开发布页面，请检查系统默认浏览器') }
+}
+onMounted(async () => {
+  if (!state.desktop) return
+  await dock.initialize()
+  if (state.ready) void checkUpdates()
+})
 onUnmounted(() => { dock.dispose(); if (copyTimer) clearTimeout(copyTimer) })
 </script>
 <template>
@@ -80,6 +107,7 @@ onUnmounted(() => { dock.dispose(); if (copyTimer) clearTimeout(copyTimer) })
         <div v-if="state.loading" class="notice info" role="status"><span class="spinner" />正在加载本机工作空间…</div>
         <div v-if="state.desktop && !state.ready && !state.loading" class="notice error" role="alert"><Icon name="alert" :size="18" /><span>桌面初始化失败，操作暂不可用。</span><button class="text-button" @click="dock.initialize()">重试</button></div>
         <div v-if="state.notice" :class="['notice', state.notice.kind]" :role="state.notice.kind === 'error' ? 'alert' : 'status'"><Icon :name="state.notice.kind === 'success' ? 'check' : state.notice.kind === 'error' ? 'alert' : 'info'" :size="18" /><span>{{ state.notice.text }}</span><button class="icon-button" aria-label="关闭提示" @click="state.notice = null"><Icon name="close" :size="15" /></button></div>
+        <div v-if="updateResult?.status === 'available' && !dismissedUpdate" class="notice info" role="status"><Icon name="download" :size="18" /><span>发现 Astralink {{ updateResult.latestVersion }}，当前为 {{ updateResult.currentVersion }}。</span><button class="button secondary" @click="openRelease">查看安装包</button><button class="icon-button" aria-label="暂不更新" @click="dismissedUpdate = true"><Icon name="close" :size="15" /></button></div>
         <DashboardPanel v-if="page === 'dashboard'" :dock="dock" @navigate="page=$event" @open-server="openServer" @create="editor={}"/>
         <template v-else-if="page === 'servers'">
           <div class="overview-grid">
@@ -95,7 +123,7 @@ onUnmounted(() => { dock.dispose(); if (copyTimer) clearTimeout(copyTimer) })
         </template>
         <ImportPanel v-else-if="page === 'import'" :dock="dock" />
         <RuntimeLogsPanel v-else-if="page === 'logs'" :dock="dock" />
-        <SettingsPanel v-else :dock="dock" />
+        <SettingsPanel v-else :dock="dock" :update-result="updateResult" :checking-update="checkingUpdate" @check-update="checkUpdates" @open-release="openRelease" />
         <footer v-if="page !== 'dashboard'" class="workspace-footer"><span>星枢 · Astralink — 一处连接，万物可达。</span><span><Icon name="shield" :size="13" />本地配置 · 系统凭据库</span></footer>
       </div>
     </main>

@@ -305,6 +305,8 @@ fn malformed_codex_config_is_never_overwritten() {
 #[test]
 fn discovery_uses_supplied_roots_and_does_not_read_vault_files() {
     let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".nyaterm")).unwrap();
+    std::fs::write(dir.path().join(".nyaterm/nyaterm.redb"), b"fixture").unwrap();
     let roaming = dir.path().join("AppData/Roaming");
     std::fs::create_dir_all(roaming.join("tabby")).unwrap();
     std::fs::write(roaming.join("tabby/config.yaml"), "vault: encrypted").unwrap();
@@ -315,6 +317,9 @@ fn discovery_uses_supplied_roots_and_does_not_read_vault_files() {
         .unwrap();
     assert!(tabby.path.ends_with("config.yaml"));
     assert!(found.iter().any(|s| s.kind == "netcatty"));
+    assert!(found
+        .iter()
+        .any(|s| s.kind == "nyaterm" && s.exists && s.path.ends_with("nyaterm.redb")));
 }
 #[test]
 fn release_runtime_resolves_exact_resource_map() {
@@ -749,6 +754,77 @@ fn client_registration_merges_only_astralink_and_keeps_backup() {
     }
 }
 #[test]
+fn claude_desktop_registration_uses_local_stdio_bridge_and_preserves_other_servers() {
+    let dir = tempfile::tempdir().unwrap();
+    let node = dir.path().join("node.exe");
+    let bridge = dir.path().join("stdio-bridge.mjs");
+    std::fs::write(&node, "node").unwrap();
+    std::fs::write(&bridge, "bridge").unwrap();
+    let path = dir.path().join("claude_desktop_config.json");
+    let original = r#"{"mcpServers":{"other":{"command":"helper"}}}"#;
+    std::fs::write(&path, original).unwrap();
+    let result = crate::client_setup::register_with_bridge(
+        "claude-desktop",
+        &path,
+        18766,
+        "fixture-token",
+        Some((&node, &bridge)),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(result.backup_path.unwrap()).unwrap(),
+        original
+    );
+    let data: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(data["mcpServers"]["other"]["command"], "helper");
+    assert_eq!(
+        data["mcpServers"]["astralink"]["command"],
+        node.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        data["mcpServers"]["astralink"]["args"][0],
+        bridge.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        data["mcpServers"]["astralink"]["env"]["ASTRALINK_MCP_TOKEN"],
+        "fixture-token"
+    );
+    assert!(
+        !crate::client_setup::register_with_bridge(
+            "claude-desktop",
+            &path,
+            18766,
+            "fixture-token",
+            Some((&node, &bridge))
+        )
+        .unwrap()
+        .reload_required
+    );
+    assert!(crate::client_setup::register_with_bridge(
+        "claude-desktop",
+        &path,
+        18766,
+        "fixture-token",
+        None
+    )
+    .is_err());
+    let workbuddy = dir.path().join("workbuddy.json");
+    crate::client_setup::register_with_bridge(
+        "workbuddy",
+        &workbuddy,
+        18766,
+        "fixture-token",
+        Some((&node, &bridge)),
+    )
+    .unwrap();
+    let config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&workbuddy).unwrap()).unwrap();
+    assert_eq!(
+        config["mcpServers"]["astralink"]["command"],
+        node.to_string_lossy().as_ref()
+    );
+}
+#[test]
 fn client_registration_keeps_invalid_config_and_rejects_unsupported_client() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("mcp.json");
@@ -803,10 +879,192 @@ fn client_default_paths_keep_existing_jsonc_instead_of_shadowing_it() {
         crate::client_setup::default_path("cursor", dir.path(), None).unwrap(),
         dir.path().join(".cursor/mcp.json")
     );
+    assert_eq!(
+        crate::client_setup::default_path("workbuddy", dir.path(), None).unwrap(),
+        dir.path().join(".workbuddy/mcp.json")
+    );
     if cfg!(windows) {
         assert!(crate::client_setup::default_path("vscode", dir.path(), None).is_err());
     } else {
         assert!(crate::client_setup::default_path("vscode", dir.path(), None).is_ok());
     }
     assert!(crate::client_setup::default_path("windsurf", dir.path(), None).is_err());
+}
+#[test]
+fn finalshell_directory_imports_ssh_groups_without_decrypting_passwords() {
+    let dir = tempfile::tempdir().unwrap();
+    let conn = dir.path().join("conn");
+    std::fs::create_dir_all(&conn).unwrap();
+    std::fs::write(
+        conn.join("folder.json"),
+        r#"{"id":"f1","name":"生产","parent_id":"root"}"#,
+    )
+    .unwrap();
+    std::fs::write(conn.join("one_connect_config.json"), r#"{"name":"web","host":"example.org","port":2222,"user_name":"ops","parent_id":"f1","conection_type":100,"password":"encrypted-fixture"}"#).unwrap();
+    std::fs::write(
+        conn.join("other_connect_config.json"),
+        r#"{"name":"telnet","host":"example.org","conection_type":101}"#,
+    )
+    .unwrap();
+    let preview = crate::importers::preview_file("finalshell", &conn, dir.path()).unwrap();
+    assert_eq!(preview.profiles.len(), 1);
+    assert_eq!(preview.profiles[0].group, "生产");
+    assert_eq!(preview.profiles[0].port, 2222);
+    assert!(preview.profiles[0].password.is_none());
+    assert_eq!(preview.stats.needs_credential, 1);
+    assert_eq!(preview.stats.unsupported, 1);
+}
+#[test]
+fn nyaterm_json_imports_password_sessions_and_marks_inline_keys_for_reselection() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("sessions.json");
+    let input = r#"{"version":1,"passwords":[{"ref":"p1","name":"ops","password":"fixture-secret"}],"ssh_keys":[{"ref":"k1","name":"ops-key","private_key":"-----BEGIN OPENSSH PRIVATE KEY-----fixture"}],"sessions":[{"name":"web","type":"ssh","group_path":["Production","Web"],"host":"example.org","username":"ops","auth":{"mode":"password","password_ref":"p1"}},{"name":"db","type":"ssh","host":"db.example.org","username":"root","auth":{"mode":"key","key_ref":"k1"}},{"name":"local","type":"local_terminal"}]}"#;
+    std::fs::write(&file, input).unwrap();
+    let preview = crate::importers::preview_file("nyaterm", &file, dir.path()).unwrap();
+    assert_eq!(preview.profiles.len(), 2);
+    assert_eq!(preview.profiles[0].group, "Production/Web");
+    assert_eq!(
+        preview.profiles[0].password.as_deref(),
+        Some("fixture-secret")
+    );
+    assert!(!preview.profiles[1].enabled);
+    assert!(preview
+        .issues
+        .iter()
+        .any(|issue| issue.message.contains("重新选择本地私钥")));
+    assert_eq!(preview.stats.unsupported, 2);
+}
+#[test]
+fn nyaterm_redb_imports_ssh_metadata_without_reading_credentials_or_changing_source() {
+    use redb::TableDefinition;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nyaterm.redb");
+    let db = redb::Database::create(&path).unwrap();
+    let tx = db.begin_write().unwrap();
+    {
+        let mut meta = tx
+            .open_table(TableDefinition::<&str, &str>::new("meta"))
+            .unwrap();
+        meta.insert("schema_version", "3").unwrap();
+        let mut groups = tx
+            .open_table(TableDefinition::<&str, &[u8]>::new("groups"))
+            .unwrap();
+        groups
+            .insert("groups/root", r#"{"id":"root","name":"生产"}"#.as_bytes())
+            .unwrap();
+        groups
+            .insert(
+                "groups/web",
+                r#"{"id":"web","name":"Web","parent_id":"root"}"#.as_bytes(),
+            )
+            .unwrap();
+        let mut connections = tx
+            .open_table(TableDefinition::<&str, &[u8]>::new("connections"))
+            .unwrap();
+        connections.insert("connections/one", r#"{"id":"one","name":"web-01","type":"ssh","host":"web.example.org","port":2222,"username":"deploy","group_id":"web","auth":{"mode":"password","has_password":true}}"#.as_bytes()).unwrap();
+        connections
+            .insert(
+                "connections/two",
+                r#"{"id":"two","name":"local","type":"local_terminal"}"#.as_bytes(),
+            )
+            .unwrap();
+        let mut credentials = tx
+            .open_table(TableDefinition::<&str, &[u8]>::new("credentials"))
+            .unwrap();
+        credentials
+            .insert(
+                "credentials/connection-password/one",
+                b"encrypted-fixture".as_slice(),
+            )
+            .unwrap();
+    }
+    tx.commit().unwrap();
+    drop(db);
+    let original = std::fs::read(&path).unwrap();
+    let preview = crate::importers::preview_file("nyaterm", &path, dir.path()).unwrap();
+    assert_eq!(preview.profiles.len(), 1);
+    assert_eq!(preview.profiles[0].group, "生产/Web");
+    assert_eq!(preview.profiles[0].port, 2222);
+    assert!(preview.profiles[0].password.is_none());
+    assert_eq!(preview.stats.needs_credential, 1);
+    assert_eq!(preview.stats.unsupported, 1);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
+#[test]
+fn mobaxterm_bookmarks_keep_nested_group_and_skip_other_protocols() {
+    let input = "[Bookmarks]\nSubRep=Production\\Web\nweb=#109#0%web.example.org%2222%deploy%\nother=#111#0%telnet.example.org%23%ops%\n";
+    let p = crate::importers::parse(
+        "mobaxterm",
+        input,
+        Path::new("hosts.mxtsessions"),
+        Path::new("."),
+    )
+    .unwrap();
+    assert_eq!(p.profiles.len(), 1);
+    assert_eq!(p.profiles[0].group, "Production/Web");
+    assert_eq!(p.profiles[0].host, "web.example.org");
+    assert_eq!(p.profiles[0].port, 2222);
+    assert_eq!(p.profiles[0].username, "deploy");
+    assert_eq!(p.stats.unsupported, 1);
+}
+
+#[test]
+fn electerm_bookmarks_resolve_group_and_skip_non_ssh() {
+    let input = r#"{"bookmarkGroups":[{"id":"parent","title":"Production","bookmarkGroupIds":["child"]},{"id":"child","title":"Web","bookmarkIds":["web"]}],"bookmarks":[{"id":"web","title":"web-01","type":"ssh","enableSsh":true,"host":"web.example.org","username":"deploy","port":2200,"authType":"password"},{"title":"db","type":"rdp","host":"db.example.org"}]}"#;
+    let p = crate::importers::parse(
+        "electerm",
+        input,
+        Path::new("bookmarks.json"),
+        Path::new("."),
+    )
+    .unwrap();
+    assert_eq!(p.profiles.len(), 1);
+    assert_eq!(p.profiles[0].group, "Production/Web");
+    assert_eq!(p.profiles[0].port, 2200);
+    assert_eq!(p.stats.unsupported, 1);
+}
+
+#[test]
+fn securecrt_xml_reads_nested_ssh2_only() {
+    let input = r#"<VanDyke><key name="Sessions"><key name="Production"><key name="web"><string name="Protocol Name">SSH2</string><string name="Hostname">web.example.org</string><dword name="[SSH2] Port">2200</dword><string name="Username">deploy</string></key><key name="telnet"><string name="Protocol Name">Telnet</string><string name="Hostname">other</string></key></key></key></VanDyke>"#;
+    let p = crate::importers::parse(
+        "securecrt",
+        input,
+        Path::new("sessions.xml"),
+        Path::new("."),
+    )
+    .unwrap();
+    assert_eq!(p.profiles.len(), 1);
+    assert_eq!(p.profiles[0].group, "Production");
+    assert_eq!(p.profiles[0].port, 2200);
+    assert_eq!(p.stats.unsupported, 1);
+}
+
+#[test]
+fn windterm_sessions_use_plain_auto_login_and_require_master_password_when_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("terminal")).unwrap();
+    let sessions = dir.path().join("terminal/user.sessions");
+    std::fs::write(&sessions, r#"[{"session.protocol":"SSH","session.target":"deploy@web.example.org","session.label":"web","session.group":"Production>Web","session.autoLogin":"{\"PasswordEnabled\":true,\"Password\":\"test-fixture\"}"}]"#).unwrap();
+    let p = crate::importers::preview_file("windterm", &sessions, dir.path()).unwrap();
+    assert_eq!(p.profiles[0].username, "deploy");
+    assert_eq!(p.profiles[0].group, "Production/Web");
+    assert_eq!(p.profiles[0].password.as_deref(), Some("test-fixture"));
+    std::fs::write(
+        dir.path().join("user.config"),
+        r#"{"application.fingerprint":"fixture","application.masterPassword":true}"#,
+    )
+    .unwrap();
+    assert!(
+        crate::importers::preview_file("windterm", &sessions, dir.path())
+            .err()
+            .is_some_and(|error| error.contains("主密码"))
+    );
+    assert!(crate::importers::preview_file_with_password(
+        "windterm",
+        &sessions,
+        dir.path(),
+        Some("fixture-master")
+    )
+    .is_ok());
 }

@@ -149,6 +149,14 @@ pub struct EngineManager {
     logs: Option<Arc<RuntimeLogs>>,
 }
 impl EngineManager {
+    pub fn bridge_paths(&self) -> Result<(PathBuf, PathBuf), String> {
+        let script = self.paths.cwd.join("src/stdio-bridge.mjs");
+        if !self.paths.node.is_file() || !script.is_file() {
+            return Err("本机 MCP 桥接资源不存在，请检查安装包".into());
+        }
+        Ok((self.paths.node.clone(), script))
+    }
+
     pub fn new(paths: RuntimePaths, port: u16, mcp_token: String) -> Result<Self, String> {
         // Explicitly bypass proxies: credentials only travel to the owned loopback child.
         let client = reqwest::Client::builder()

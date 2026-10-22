@@ -59,6 +59,17 @@ jobs:
       APPIMAGE_EXTRACT_AND_RUN: '1'
     steps:
       - uses: actions/checkout@v4
+      - name: Verify tag matches package version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          npm_version=$(node -p "require('./package.json').version")
+          tauri_version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          rust_version=$(awk -F '"' '/^version = / { print $2; exit }' src-tauri/Cargo.toml)
+          if [[ "$GITHUB_REF_NAME" != "v$npm_version" || "$npm_version" != "$tauri_version" || "$npm_version" != "$rust_version" ]]; then
+            echo 'Tag and application versions must match.' >&2
+            exit 1
+          fi
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |

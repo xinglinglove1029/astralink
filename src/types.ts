@@ -1,6 +1,6 @@
 export type AuthType = 'password' | 'privateKey' | 'agent'
 export type SecretField = 'password' | 'passphrase' | 'totpSecret'
-export type SourceKind = 'xshell' | 'tabby' | 'netcatty' | 'mcp-json' | 'openssh'
+export type SourceKind = 'xshell' | 'tabby' | 'netcatty' | 'mcp-json' | 'openssh' | 'finalshell' | 'nyaterm' | 'mobaxterm' | 'securecrt' | 'electerm' | 'windterm' | 'termius' | 'nya-backup'
 export interface ConnectionProfile {
   id: string
   name: string
@@ -61,7 +61,7 @@ export interface CommandMap {
   get_runtime_logs: { args: Record<string, never>; result: RuntimeLogSnapshot }
   export_runtime_logs: { args: { filePath: string }; result: void }
   discover_sources: { args: Record<string, never>; result: SourceCandidate[] }
-  preview_import: { args: { sourceKind: SourceKind; filePath: string }; result: ImportPreview }
+  preview_import: { args: { sourceKind: SourceKind; filePath: string; importPassword?: string }; result: ImportPreview }
   apply_import: { args: { profiles: ConnectionProfile[]; strategy: 'merge' | 'replace' }; result: ConnectionProfile[] }
   upsert_profile: { args: { profile: ConnectionProfile }; result: ConnectionProfile[] }
   reveal_profile_secret: { args: { profileId: string; field: SecretField }; result: string | null }
@@ -77,5 +77,9 @@ export interface CommandMap {
   register_codex: { args: Record<string, never>; result: CodexRegistration }
   register_mcp_client: { args: { clientId: string; filePath?: string }; result: CodexRegistration }
   get_mcp_token: { args: Record<string, never>; result: string }
+  get_mcp_bridge_paths: { args: Record<string, never>; result: { nodePath: string; scriptPath: string } }
+  preview_webdav_backup: { args: { url: string; username: string; password: string; passphrase: string }; result: { fingerprint: string; serverCount: number } }
+  backup_to_webdav: { args: { url: string; username: string; password: string; passphrase: string; expectedFingerprint?: string }; result: { fingerprint: string; serverCount: number } }
+  restore_webdav_backup: { args: { url: string; username: string; password: string; passphrase: string; expectedFingerprint: string }; result: ConnectionProfile[] }
 }
 export interface EventMap { 'astralink-auth': AuthChallenge; 'astralink-engine': EngineStatus }

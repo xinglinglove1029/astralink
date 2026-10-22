@@ -5,6 +5,7 @@ Astralink uses the following main upstream components. Distributed runtime resou
 - classfang/ssh-mcp-server / @fangjunjie/ssh-mcp-server 1.10.0: ISC License, Copyright (c) 2025 junki.cn.
 - Node.js: Node.js and its bundled components use their own licenses; include the Node LICENSE file with the runtime.
 - Tauri, Vue, MCP SDK, ssh2, Rust crates and npm dependencies: see their respective package license files.
+- NyaTerm (nyakang/nyaterm), Copyright (c) 2026 Kang, MIT. Termius record decoding, WindTerm and other client import formats, and `.nya` portable backup compatibility derive from commit 6af18f59b865d5eae596876ffc159acd14826abb. Full license: docs/licenses/nyaterm-MIT.txt (also shipped in engine resources).
 
 ISC License for SSH MCP:
 

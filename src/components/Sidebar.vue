@@ -2,6 +2,7 @@
 import Icon from './Icon.vue'
 import NexusMark from './NexusMark.vue'
 import type { EngineStatus } from '../types'
+import { version as appVersion } from '../../package.json'
 defineProps<{ page: string; group: string; groups: { name: string; count: number }[]; total: number; engine: EngineStatus; desktop: boolean }>()
 const emit = defineEmits<{ navigate: [page: string]; group: [group: string] }>()
 </script>
@@ -25,7 +26,7 @@ const emit = defineEmits<{ navigate: [page: string]; group: [group: string] }>()
     <div class="sidebar-bottom">
       <div class="sidebar-service"><span :class="['status-dot', { live: desktop && engine.running }]" /><span>{{ !desktop ? '桌面应用未连接' : engine.running ? 'MCP 服务运行中' : 'MCP 服务未启动' }}</span></div>
       <p>本机运行 · SSH 连接由你掌控</p>
-      <div class="sidebar-version"><span class="mini-mark"><NexusMark :size="19"/></span><span>星枢 <small>ASTRALINK · v0.1.0</small></span><Icon name="shield" :size="16" /></div>
+      <div class="sidebar-version"><span class="mini-mark"><NexusMark :size="19"/></span><span>星枢 <small>ASTRALINK · v{{ appVersion }}</small></span><Icon name="shield" :size="16" /></div>
     </div>
   </aside>
 </template>

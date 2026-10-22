@@ -1,7 +1,15 @@
+mod electerm;
+mod finalshell;
 mod json;
+mod mobaxterm;
 mod netcatty;
+mod nya_backup;
+mod nyaterm;
 mod openssh;
+mod securecrt;
 mod tabby;
+mod termius;
+mod windterm;
 mod xshell;
 use crate::models::*;
 use serde_json::Value;
@@ -26,12 +34,55 @@ pub fn parse(kind: &str, text: &str, path: &Path, home: &Path) -> Result<ImportP
         "netcatty" => netcatty::parse(text, path, home, &mut preview)?,
         "openssh" => openssh::parse(text, path, home, &mut preview)?,
         "xshell" => xshell::parse(text, path, home, &mut preview)?,
+        "finalshell" => finalshell::parse(text, path, &mut preview)?,
+        "nyaterm" => nyaterm::parse(text, path, home, &mut preview)?,
+        "mobaxterm" => mobaxterm::parse(text, &mut preview)?,
+        "electerm" => electerm::parse(text, &mut preview)?,
+        "securecrt" => securecrt::parse(text, &mut preview)?,
+        "windterm" => windterm::parse(text, path, home, None, &mut preview)?,
         _ => return Err("不支持的导入来源".into()),
     }
     finalize(&mut preview);
     Ok(preview)
 }
 pub fn preview_file(kind: &str, path: &Path, home: &Path) -> Result<ImportPreview, String> {
+    preview_file_with_password(kind, path, home, None)
+}
+
+pub fn preview_file_with_password(
+    kind: &str,
+    path: &Path,
+    home: &Path,
+    password: Option<&str>,
+) -> Result<ImportPreview, String> {
+    if kind == "nya-backup" {
+        return nya_backup::file(path, home, password);
+    }
+    if kind == "termius" {
+        return termius::database(path);
+    }
+    if kind == "windterm" {
+        let mut preview = ImportPreview {
+            source: kind.into(),
+            source_path: path.to_string_lossy().into(),
+            profiles: Vec::new(),
+            issues: Vec::new(),
+            stats: ImportStats::default(),
+        };
+        windterm::parse(&read_text(path, false)?, path, home, password, &mut preview)?;
+        finalize(&mut preview);
+        return Ok(preview);
+    }
+    if kind == "nyaterm"
+        && path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("redb"))
+    {
+        return nyaterm::database(path);
+    }
+    if kind == "finalshell" && path.is_dir() {
+        return finalshell::directory(path);
+    }
     if kind == "xshell"
         && path
             .extension()
@@ -74,7 +125,12 @@ pub fn preview_file(kind: &str, path: &Path, home: &Path) -> Result<ImportPrevie
         finalize(&mut result);
         return Ok(result);
     }
-    parse(kind, &read_text(path, kind == "xshell")?, path, home)
+    parse(
+        kind,
+        &read_text(path, matches!(kind, "xshell" | "mobaxterm" | "securecrt"))?,
+        path,
+        home,
+    )
 }
 fn collect_xshell(path: &Path, files: &mut Vec<PathBuf>, depth: usize) -> Result<(), String> {
     if depth > 8 {

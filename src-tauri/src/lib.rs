@@ -1,4 +1,5 @@
 pub mod client_setup;
+pub mod cloud_backup;
 pub mod commands;
 pub mod config_sync;
 #[cfg(test)]
@@ -23,6 +24,7 @@ use tauri::Manager;
 pub fn builder() -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let home = std::env::var_os("USERPROFILE")
@@ -106,6 +108,10 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::register_codex,
             commands::register_mcp_client,
             commands::get_mcp_token,
+            commands::get_mcp_bridge_paths,
+            commands::preview_webdav_backup,
+            commands::backup_to_webdav,
+            commands::restore_webdav_backup,
         ])
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

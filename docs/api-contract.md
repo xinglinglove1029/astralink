@@ -32,6 +32,11 @@ interface ConnectionTest { status:'connected'|'partial'|'auth_required'|'failed'
 - export_runtime_logs {filePath:string} -> void; native save dialog chooses a new absolute .log/.txt filename outside the log directory. Refuses existing files; exports validated recent records with UTC timestamps and UUID correlation.
 - discover_sources {} -> SourceCandidate[]
 - preview_import {sourceKind,filePath} -> ImportPreview
+- sourceKind 包含 xshell、mobaxterm（`.mxtsessions`）、windterm（`user.sessions`）、securecrt（XML）、finalshell（`conn` 目录或单个 JSON）、termius（本机 IndexedDB 目录）、electerm（书签 JSON）、nyaterm（本机 `.redb` 或 v1 JSON）、openssh、mcp-json、tabby、netcatty、nya-backup（`.nya`）。仅转换 SSH 会话。`.redb` 只读连接与分组，必要时只在临时副本恢复；Termius 使用当前用户系统凭据库 localKey 解密本机 IndexedDB 副本；不写回来源。
+- preview_import {sourceKind,filePath,importPassword?} -> ImportPreview；WindTerm 主密码和 `.nya` 备份密码仅用于当次预览，敏感字段不会回传 UI。
+- preview_webdav_backup {url,username,password,passphrase} -> {fingerprint,serverCount}
+- backup_to_webdav {url,username,password,passphrase,expectedFingerprint?} -> {fingerprint,serverCount}; 首次只创建，覆盖需远端原始指纹与 ETag 匹配。
+- restore_webdav_backup {url,username,password,passphrase,expectedFingerprint} -> ConnectionProfile[]; 重新下载并核对指纹，替换本机连接。只接受 HTTPS WebDAV 文件地址；口令不保存。
 - apply_import {profiles,strategy:'merge'|'replace'} -> ConnectionProfile[]
 - upsert_profile {profile} / delete_profile {profileId} -> ConnectionProfile[]
 - reveal_profile_secret {profileId,field:'password'|'passphrase'|'totpSecret'} -> string|null. Available only through an explicit click in the desktop editor; never included in AppState, list views or diagnostic output. The display value is cleared when hidden or the editor closes, and is not merged into the editable profile.
@@ -75,7 +80,8 @@ Runtime logs live in app-data/logs/runtime.jsonl (1 MiB current file plus runtim
 ## 客户端快捷接入
 
 - register_mcp_client {clientId: string, filePath?: string} -> {configPath, backupPath?, reloadRequired}
-- clientId: codex、claude-code、cursor、vscode、windsurf、antigravity、opencode、openclaw、hermes。Claude Desktop / ChatGPT 暂不提供本机快捷接入。
+- get_mcp_bridge_paths {} -> {nodePath:string,scriptPath:string}; returns installed local paths only, never credentials. Desktop snippets use them with a token placeholder.
+- clientId: codex、claude-code、claude-desktop、workbuddy、cursor、vscode、windsurf、antigravity、opencode、openclaw、hermes。Claude Desktop / WorkBuddy 通过打包的 Node 和 stdio 桥接连接本机 HTTP 服务；Cherry Studio 可在自身界面导入桥接片段（桌面版填写绝对路径，令牌手动复制）；云端 ChatGPT 需 Secure MCP Tunnel 或独立 HTTPS 网关，暂不支持本机快捷接入。
 - 未指定路径时写入对应用户级配置；Codex 继续遵循已有 CODEX_HOME 配置位置。Windsurf 要求用户先选择当前实际使用的配置文件。
 - 只更新 Astralink 节点，其余设置保留。写入前创建旁路备份，再校验文件未发生变化并原子替换；错误不包含配置内容或令牌。
 - JSON/YAML 配置按结构重新序列化；格式可能调整，YAML 注释不保留。含注释的 JSON、JSON5 和非对象节点拒绝自动写入，保留原文件，使用手动合并。

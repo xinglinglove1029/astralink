@@ -74,6 +74,34 @@ pub fn discover(
         );
     }
     add("xshell", "Xshell", documents.join("Xshell/Sessions"));
+    add("finalshell", "FinalShell", home.join("finalshell/conn"));
+    add("finalshell", "FinalShell", home.join(".finalshell/conn"));
+    add("nyaterm", "NyaTerm", home.join(".nyaterm/nyaterm.redb"));
+    add(
+        "termius",
+        "Termius",
+        roaming.join("Termius/IndexedDB/file__0.indexeddb.leveldb"),
+    );
+    add(
+        "termius",
+        "Termius",
+        home.join(".config/Termius/IndexedDB/file__0.indexeddb.leveldb"),
+    );
+    add(
+        "termius",
+        "Termius",
+        home.join("Library/Application Support/Termius/IndexedDB/file__0.indexeddb.leveldb"),
+    );
+    add(
+        "windterm",
+        "WindTerm",
+        home.join(".wind/profiles/default.v10/terminal/user.sessions"),
+    );
+    add(
+        "windterm",
+        "WindTerm",
+        roaming.join("WindTerm/profiles/default.v10/terminal/user.sessions"),
+    );
     add("netcatty", "Netcatty CSV", documents.join("netcatty.csv"));
     add(
         "netcatty",

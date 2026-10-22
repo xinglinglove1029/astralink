@@ -1,5 +1,5 @@
 use crate::{
-    client_setup, config_sync,
+    client_setup, cloud_backup, config_sync,
     credentials::SecretStore,
     discovery,
     engine::{EngineManager, RuntimePaths},
@@ -86,7 +86,15 @@ impl AppCore {
         self.store.lock().map_err(|_| "应用数据锁不可用".into())
     }
     pub fn preview(&self, kind: &str, path: &Path) -> Result<ImportPreview, String> {
-        let mut preview = importers::preview_file(kind, path, &self.home)?;
+        self.preview_with_password(kind, path, None)
+    }
+    pub fn preview_with_password(
+        &self,
+        kind: &str,
+        path: &Path,
+        password: Option<&str>,
+    ) -> Result<ImportPreview, String> {
+        let mut preview = importers::preview_file_with_password(kind, path, &self.home, password)?;
         let cached = preview.profiles.clone();
         for p in &mut preview.profiles {
             p.password = None;
@@ -238,8 +246,13 @@ pub fn preview_import(
     state: State<'_, AppCore>,
     source_kind: String,
     file_path: String,
+    import_password: Option<String>,
 ) -> Result<ImportPreview, String> {
-    state.preview(&source_kind, Path::new(&file_path))
+    state.preview_with_password(
+        &source_kind,
+        Path::new(&file_path),
+        import_password.as_deref(),
+    )
 }
 #[tauri::command]
 pub async fn apply_import(
@@ -375,6 +388,12 @@ pub async fn get_mcp_token(state: State<'_, AppCore>) -> Result<String, String> 
     state.ensure_active()?;
     state.store()?.mcp_token()
 }
+#[tauri::command]
+pub async fn get_mcp_bridge_paths(state: State<'_, AppCore>) -> Result<serde_json::Value, String> {
+    state.ensure_active()?;
+    let (node, script) = state.engine.bridge_paths()?;
+    Ok(serde_json::json!({"nodePath": node, "scriptPath": script}))
+}
 #[cfg(test)]
 #[path = "commands_tests.rs"]
 mod tests;
@@ -399,10 +418,123 @@ pub async fn register_mcp_client(
         None => client_setup::default_path(&client_id, &state.home, state.roaming.as_deref())?,
     };
     let store = state.store()?;
-    client_setup::register(
+    let bridge = if matches!(client_id.as_str(), "claude-desktop" | "workbuddy") {
+        Some(state.engine.bridge_paths()?)
+    } else {
+        None
+    };
+    client_setup::register_with_bridge(
         &client_id,
         &path,
         store.settings().mcp_port,
         &store.mcp_token()?,
+        bridge
+            .as_ref()
+            .map(|(node, script)| (node.as_path(), script.as_path())),
     )
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteBackupPreview {
+    pub fingerprint: String,
+    pub server_count: usize,
+}
+
+#[tauri::command]
+pub async fn preview_webdav_backup(
+    state: State<'_, AppCore>,
+    url: String,
+    username: String,
+    password: String,
+    passphrase: String,
+) -> Result<RemoteBackupPreview, String> {
+    state.ensure_active()?;
+    let client = cloud_backup::webdav_client(&url)?;
+    let (bytes, _) = cloud_backup::fetch(&client, &url, &username, &password)
+        .await?
+        .ok_or("远端还没有备份文件")?;
+    let snapshot = cloud_backup::decrypt(&bytes, &passphrase)?;
+    Ok(RemoteBackupPreview {
+        fingerprint: cloud_backup::fingerprint(&bytes),
+        server_count: snapshot.profiles.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn backup_to_webdav(
+    state: State<'_, AppCore>,
+    url: String,
+    username: String,
+    password: String,
+    passphrase: String,
+    expected_fingerprint: Option<String>,
+) -> Result<RemoteBackupPreview, String> {
+    let _operation = state.operations.lock().await;
+    state.ensure_active()?;
+    let client = cloud_backup::webdav_client(&url)?;
+    let profiles = {
+        let store = state.store()?;
+        store
+            .profiles()
+            .iter()
+            .map(|p| {
+                store
+                    .resolve(&p.id)
+                    .map(cloud_backup::BackupProfile::from_resolved)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let count = profiles.len();
+    let bytes = cloud_backup::encrypt(
+        &cloud_backup::Snapshot {
+            version: 1,
+            profiles,
+        },
+        &passphrase,
+    )?;
+    let fingerprint = cloud_backup::fingerprint(&bytes);
+    cloud_backup::upload(
+        &client,
+        &url,
+        &username,
+        &password,
+        bytes,
+        expected_fingerprint.as_deref(),
+    )
+    .await?;
+    Ok(RemoteBackupPreview {
+        fingerprint,
+        server_count: count,
+    })
+}
+
+#[tauri::command]
+pub async fn restore_webdav_backup(
+    state: State<'_, AppCore>,
+    url: String,
+    username: String,
+    password: String,
+    passphrase: String,
+    expected_fingerprint: String,
+) -> Result<Vec<ConnectionProfile>, String> {
+    let _operation = state.operations.lock().await;
+    state.ensure_active()?;
+    let client = cloud_backup::webdav_client(&url)?;
+    let (bytes, _) = cloud_backup::fetch(&client, &url, &username, &password)
+        .await?
+        .ok_or("远端备份已不存在")?;
+    if cloud_backup::fingerprint(&bytes) != expected_fingerprint {
+        return Err("远端备份已改变，请重新预览".into());
+    }
+    let snapshot = cloud_backup::decrypt(&bytes, &passphrase)?;
+    let profiles: Vec<_> = snapshot
+        .profiles
+        .into_iter()
+        .map(cloud_backup::BackupProfile::into_profile)
+        .collect();
+    crate::storage::validate_profiles(&profiles, true)?;
+    state
+        .commit_and_sync(|core| core.store()?.apply(profiles, ImportStrategy::Replace))
+        .await
 }

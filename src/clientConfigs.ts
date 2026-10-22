@@ -1,13 +1,14 @@
 export type ClientId =
   | 'claude-code' | 'codex' | 'cursor' | 'vscode' | 'windsurf'
   | 'antigravity' | 'opencode' | 'openclaw' | 'hermes'
-  | 'claude-desktop' | 'chatgpt'
+  | 'claude-desktop' | 'chatgpt' | 'workbuddy' | 'cherry-studio'
 
 export interface ClientGuide {
   id: ClientId
   name: string
   location: string
   supported: boolean
+  quickSetup?: boolean
   steps: string[]
   verify: string
   caution?: string
@@ -32,10 +33,14 @@ export const clientGuides: ClientGuide[] = [
     steps: ['在 OpenClaw 的 MCP 配置编辑器中合并片段。', '填写访问令牌，确保 Gateway 与 星枢 Astralink 在同一台机器。'], verify: '运行 openclaw mcp doctor astralink --probe。', caution: '远程 Gateway 中的 127.0.0.1 是 Gateway 自己，不是运行 星枢 Astralink 的电脑。' },
   { id: 'hermes', name: 'Hermes', location: '~/.hermes/config.yaml', supported: true,
     steps: ['将片段合并到 mcp_servers，填写访问令牌。', '在同一台电脑上启动 Hermes。'], verify: '在 Hermes 新会话中查看 MCP 工具。' },
-  { id: 'claude-desktop', name: 'Claude Desktop', location: '当前本机 HTTP 接入未验证', supported: false,
-    steps: ['目前不生成可能失效的 localhost 配置。', '需先实现并验证 Claude Desktop 对本机 HTTP 或 stdio 桥接的接入。'], verify: '该客户端尚未通过 星枢 Astralink 端到端验收。' },
-  { id: 'chatgpt', name: 'ChatGPT', location: '网页版无法直接访问本机环回地址', supported: false,
-    steps: ['当前 星枢 Astralink 只监听 127.0.0.1，云端 ChatGPT 无法直接回连。', '若将来接入，应另行设计经认证的 HTTPS 网关并评估远程暴露风险。'], verify: '当前不提供可用的本机配置片段。' },
+  { id: 'claude-desktop', name: 'Claude Desktop', location: '本机 claude_desktop_config.json', supported: true,
+    steps: ['一键配置写入本机 stdio 桥接与内置 Node 路径。', '保持 Astralink 服务运行，完全退出并重新启动 Claude Desktop。'], verify: '在 Claude Desktop 的 MCP 工具列表检查 astralink。', caution: '客户端配置保存访问令牌；仅写入本机用户配置，不要同步或提交。' },
+  { id: 'chatgpt', name: 'ChatGPT', location: '云端连接器需 Secure MCP Tunnel 或公网 HTTPS 地址', supported: false,
+    steps: ['本机 127.0.0.1 地址无法直接用于云端 ChatGPT。', '在支持该功能的 ChatGPT 工作空间配置 Secure MCP Tunnel，或单独部署经认证的公网 HTTPS MCP 网关。', '确认身份认证、工具权限及审计策略后，在 ChatGPT 的自定义 MCP 连接中添加。'], verify: '本机服务不会自动向公网开放；未配置隧道或网关前不能一键接入。', caution: '不要把本机访问令牌或 SSH 凭据粘贴到公开 URL。' },
+  { id: 'workbuddy', name: 'WorkBuddy', location: '用户级 ~/.workbuddy/mcp.json', supported: true,
+    steps: ['一键写入用户级配置，或在插件 → MCP 服务器 → 配置 MCP 中手动合并片段。', '保持 Astralink 服务运行，刷新 WorkBuddy 的 MCP 列表。'], verify: '在 MCP 服务器列表检查 astralink 状态与工具。', caution: '项目级 .workbuddy/mcp.json 可能随代码提交；不要提交含真实令牌的文件。' },
+  { id: 'cherry-studio', name: 'Cherry Studio', location: '设置 > MCP > MCP 服务器 > 添加', supported: true, quickSetup: false,
+    steps: ['在 Cherry Studio 中从 JSON 导入本机 stdio 桥接配置。', '桌面版会填入内置 Node 和脚本路径；复制令牌并替换片段中的占位符。', '启用服务器后，在目标 Agent 的 MCP 设置中绑定 astralink。'], verify: '在服务器详情查看工具，再在 Agent 中调用 list-servers。', caution: '客户端配置含访问令牌，请勿同步或提交。' },
 ]
 
 const token = '<ASTRALINK_MCP_TOKEN>'
@@ -47,7 +52,7 @@ export function mcpEndpoint(port: number): string {
   return 'http://127.0.0.1:' + port + '/mcp'
 }
 
-export function createClientSnippet(client: ClientId, port: number): string | null {
+export function createClientSnippet(client: ClientId, port: number, bridgePaths?: { nodePath: string; scriptPath: string }): string | null {
   const url = mcpEndpoint(port)
   switch (client) {
     case 'claude-code': return pretty({ mcpServers: { astralink: { type: 'http', url, headers: header } } })
@@ -60,6 +65,8 @@ export function createClientSnippet(client: ClientId, port: number): string | nu
     case 'openclaw': return pretty({ mcp: { servers: { astralink: { url, transport: 'streamable-http', enabled: true, headers: header } } } })
     case 'hermes': return 'mcp_servers:\n  astralink:\n    url: "' + url + '"\n    headers:\n      Authorization: "Bearer ' + token + '"'
     case 'claude-desktop':
+    case 'workbuddy':
+    case 'cherry-studio': return pretty({ mcpServers: { astralink: { command: bridgePaths?.nodePath ?? '<ASTRALINK_NODE_PATH>', args: [bridgePaths?.scriptPath ?? '<ASTRALINK_BRIDGE_PATH>'], env: { ASTRALINK_MCP_PORT: String(port), ASTRALINK_MCP_TOKEN: token } } } })
     case 'chatgpt': return null
   }
 }

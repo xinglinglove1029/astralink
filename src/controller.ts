@@ -147,17 +147,17 @@ export function createAstralink(bridge: DesktopBridge) {
     finally { if (revision === discoveryRevision) state.discoveryBusy = false }
   }
   function clearPreview() { previewRevision++; state.preview = null; state.previewBusy = false }
-  async function previewImport(sourceKind: SourceKind, filePath: string) {
+  async function previewImport(sourceKind: SourceKind, filePath: string, importPassword?: string) {
     if (nativeRequired() || state.mutation || !filePath.trim()) return false
     const revision = ++previewRevision
     state.preview = null
     state.previewBusy = true
     try {
-      const preview = await bridge.invoke('preview_import', { sourceKind, filePath })
+      const preview = await bridge.invoke('preview_import', { sourceKind, filePath, ...(importPassword ? { importPassword } : {}) })
       if (disposed || revision !== previewRevision) return false
       state.preview = preview
       return true
-    } catch (error) { if (revision === previewRevision && !disposed) report(error); return false }
+    } catch (error) { if (revision === previewRevision && !disposed) report(error, [importPassword]); return false }
     finally { if (revision === previewRevision) state.previewBusy = false }
   }
   async function mutate(key: string, action: () => Promise<void>, secrets: (string | undefined)[] = []) {
@@ -368,6 +368,16 @@ export function createAstralink(bridge: DesktopBridge) {
     } catch (error) { if (!disposed) report(error); return false }
     finally { state.logsExportBusy = false }
   }
-  return { state, initialize, discoverSources, clearPreview, previewImport, saveProfile, revealProfileSecret, deleteProfile, deleteProfiles, applyImport, saveSettings, setEngine, refreshEngine, registerCodex, registerClient, testConnection, submitOtp, cancelAuth, dispose, refreshRuntimeLogs, exportRuntimeLogs, refreshStorageInfo, pickFile: bridge.pickFile, pickClientConfig: () => bridge.pickFile(undefined, 'config'), report }
+  async function refreshAppState() {
+    if (nativeRequired() || !state.ready) return
+    const app = await bridge.invoke('get_app_state', {})
+    if (!disposed) {
+      replaceProfiles(app.profiles)
+      state.settings = app.settings
+      applyEngineStatus(app.engine)
+      await refreshStorageInfo()
+    }
+  }
+  return { state, initialize, refreshAppState, discoverSources, clearPreview, previewImport, saveProfile, revealProfileSecret, deleteProfile, deleteProfiles, applyImport, saveSettings, setEngine, refreshEngine, registerCodex, registerClient, testConnection, submitOtp, cancelAuth, dispose, refreshRuntimeLogs, exportRuntimeLogs, refreshStorageInfo, pickFile: bridge.pickFile, pickClientConfig: () => bridge.pickFile(undefined, 'config'), report }
 }
 export type AstralinkController = ReturnType<typeof createAstralink>
