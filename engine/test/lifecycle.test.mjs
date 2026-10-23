@@ -32,11 +32,14 @@ test('installed SDK resolution uses patched version for engine and upstream', ()
   assert.equal(sdkVersion(upstreamRequire), '1.32.1');
 });
 test('session capacity and expiry enforce bounded lifecycle', async (t) => {
-  const engine = await start(t, { maxSessions: 1, sessionTtlMs: 70 });
+  const sessionTtlMs = 5000;
+  const engine = await start(t, { maxSessions: 1, sessionTtlMs });
   const { transport } = await clientFor(t, engine);
   const denied = await request(engine, '/mcp', { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'extra', version: '1' } } }, { authorization: 'Bearer ' + tokens.mcpToken, accept: 'application/json, text/event-stream' });
   assert.equal(denied.status, 429);
-  await eventually(() => engine.sessions.size === 0);
+  // Exercise expiry independently of client initialization latency on busy CI runners.
+  engine.sessions.get(transport.sessionId).touched = Date.now() - sessionTtlMs - 1;
+  await eventually(() => engine.sessions.size === 0, sessionTtlMs * 2 + 1000);
   assert.equal((await request(engine, '/mcp', undefined, { authorization: 'Bearer ' + tokens.mcpToken, 'mcp-session-id': transport.sessionId })).status, 404);
 });
 test('engine instances retain distinct upstream manager contexts and exact tool schemas', async (t) => {
