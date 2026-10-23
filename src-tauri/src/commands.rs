@@ -27,7 +27,7 @@ pub struct AppCore {
     roaming: Option<PathBuf>,
     documents: Option<PathBuf>,
     codex_config: PathBuf,
-    operations: tokio::sync::Mutex<()>,
+    pub(crate) operations: tokio::sync::Mutex<()>,
     shutting_down: std::sync::atomic::AtomicBool,
 }
 impl AppCore {
@@ -66,7 +66,7 @@ impl AppCore {
         self.shutting_down
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
-    fn ensure_active(&self) -> Result<(), String> {
+    pub(crate) fn ensure_active(&self) -> Result<(), String> {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
             Err("应用正在退出".into())
         } else {
@@ -149,24 +149,32 @@ impl AppCore {
         *pending = None;
         Ok(saved)
     }
-    async fn commit_and_sync(
+    pub(crate) async fn commit_and_sync(
         &self,
         mutate: impl FnOnce(&Self) -> Result<Vec<ConnectionProfile>, String>,
     ) -> Result<Vec<ConnectionProfile>, String> {
-        let previous = {
+        let (previous, previous_settings) = {
             let store = self.store()?;
-            store
-                .profiles()
-                .iter()
-                .map(|p| store.resolve(&p.id))
-                .collect::<Result<Vec<_>, _>>()?
+            (
+                store
+                    .profiles()
+                    .iter()
+                    .map(|p| store.resolve(&p.id))
+                    .collect::<Result<Vec<_>, _>>()?,
+                store.settings(),
+            )
         };
         let saved = mutate(self)?;
         if let Err(error) = self.sync().await {
             self.logs.record("config_failed", None, None);
-            let rollback = self.store()?.apply(previous, ImportStrategy::Replace);
+            let rollback = self.store()?.apply_with_settings(
+                previous,
+                ImportStrategy::Replace,
+                Some(previous_settings.clone()),
+            );
             match rollback {
                 Ok(_) => {
+                    let _ = self.engine.set_port(previous_settings.mcp_port).await;
                     let resync = self.sync().await;
                     return Err(if resync.is_ok() {
                         format!("MCP 未接受配置，已撤销本次保存：{error}")
@@ -186,6 +194,70 @@ impl AppCore {
             .await
             .map_err(|error| format!("配置已保存，但 MCP 更新失败：{error}"))?;
         Ok(())
+    }
+    pub(crate) fn backup_snapshot(&self) -> Result<cloud_backup::Snapshot, String> {
+        let store = self.store()?;
+        let profiles = store
+            .profiles()
+            .iter()
+            .map(|p| {
+                store
+                    .resolve(&p.id)
+                    .map(cloud_backup::BackupProfile::from_resolved)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(cloud_backup::Snapshot {
+            version: 2,
+            profiles,
+            settings: Some(store.settings()),
+        })
+    }
+    pub(crate) async fn restore_snapshot(
+        &self,
+        snapshot: cloud_backup::Snapshot,
+        strategy: ImportStrategy,
+    ) -> Result<Vec<ConnectionProfile>, String> {
+        let mut profiles = snapshot
+            .profiles
+            .into_iter()
+            .map(cloud_backup::BackupProfile::into_profile)
+            .collect::<Vec<_>>();
+        for profile in &mut profiles {
+            if profile.auth_type == AuthType::PrivateKey
+                && profile
+                    .private_key_path
+                    .as_deref()
+                    .is_some_and(|key| !Path::new(key).is_file())
+            {
+                profile.enabled = false;
+            }
+            if profile
+                .allowed_local_paths
+                .as_ref()
+                .is_some_and(|paths| paths.iter().any(|path| !Path::new(path).is_dir()))
+            {
+                profile.allowed_local_paths = None;
+                profile.enabled = false;
+            }
+        }
+        crate::storage::validate_profiles(&profiles, true)?;
+        let settings = snapshot.settings;
+        if let Some(settings) = &settings {
+            if self.engine.status().await.running
+                && self.store()?.settings().mcp_port != settings.mcp_port
+            {
+                return Err("请先停止 MCP 服务再导入不同的端口设置".into());
+            }
+        }
+        self.commit_and_sync(|core| {
+            core.store()?
+                .apply_with_settings(profiles, strategy, settings.clone())
+        })
+        .await?;
+        if let Some(settings) = settings {
+            self.engine.set_port(settings.mcp_port).await?;
+        }
+        Ok(self.store()?.profiles())
     }
 }
 fn same_identity(a: &ConnectionProfile, b: &ConnectionProfile) -> bool {
@@ -439,6 +511,116 @@ pub async fn register_mcp_client(
 pub struct RemoteBackupPreview {
     pub fingerprint: String,
     pub server_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<AppSettings>,
+    pub needs_attention: usize,
+}
+fn backup_attention(snapshot: &cloud_backup::Snapshot) -> usize {
+    snapshot
+        .profiles
+        .iter()
+        .filter(|entry| {
+            let profile = &entry.profile;
+            profile.auth_type == AuthType::PrivateKey
+                && profile
+                    .private_key_path
+                    .as_deref()
+                    .is_some_and(|key| !Path::new(key).is_file())
+                || profile
+                    .allowed_local_paths
+                    .as_ref()
+                    .is_some_and(|paths| paths.iter().any(|path| !Path::new(path).is_dir()))
+        })
+        .count()
+}
+
+pub(crate) fn backup_preview(
+    bytes: &[u8],
+    passphrase: &str,
+) -> Result<RemoteBackupPreview, String> {
+    let snapshot = cloud_backup::decrypt(bytes, passphrase)?;
+    Ok(RemoteBackupPreview {
+        fingerprint: cloud_backup::fingerprint(bytes),
+        server_count: snapshot.profiles.len(),
+        settings: snapshot.settings.clone(),
+        needs_attention: backup_attention(&snapshot),
+    })
+}
+
+fn read_backup_file(file_path: &str) -> Result<Vec<u8>, String> {
+    let path = Path::new(file_path);
+    if !path.is_absolute() || !path.is_file() {
+        return Err("请选择有效的备份文件".into());
+    }
+    if std::fs::metadata(path)
+        .map_err(|_| "无法读取备份文件")?
+        .len()
+        > 32 * 1024 * 1024
+    {
+        return Err("备份文件超过大小限制".into());
+    }
+    std::fs::read(path).map_err(|_| "无法读取备份文件".into())
+}
+
+#[tauri::command]
+pub fn export_backup_file(
+    state: State<'_, AppCore>,
+    file_path: String,
+    passphrase: String,
+) -> Result<(), String> {
+    state.ensure_active()?;
+    let path = Path::new(&file_path);
+    if !path.is_absolute() || path.extension().and_then(|ext| ext.to_str()) != Some("backup") {
+        return Err("请选择绝对路径的 .backup 文件".into());
+    }
+    let bytes = cloud_backup::encrypt(&state.backup_snapshot()?, &passphrase)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|_| "备份文件已存在或无法创建")?;
+    use std::io::Write;
+    if file
+        .write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .is_err()
+    {
+        let _ = std::fs::remove_file(path);
+        return Err("无法写入备份文件".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn preview_backup_file(
+    state: State<'_, AppCore>,
+    file_path: String,
+    passphrase: String,
+) -> Result<RemoteBackupPreview, String> {
+    state.ensure_active()?;
+    backup_preview(&read_backup_file(&file_path)?, &passphrase)
+}
+
+#[tauri::command]
+pub async fn restore_backup_file(
+    state: State<'_, AppCore>,
+    file_path: String,
+    passphrase: String,
+    expected_fingerprint: String,
+    strategy: ImportStrategy,
+) -> Result<Vec<ConnectionProfile>, String> {
+    let _operation = state.operations.lock().await;
+    state.ensure_active()?;
+    let bytes = read_backup_file(&file_path)?;
+    if cloud_backup::fingerprint(&bytes) != expected_fingerprint {
+        return Err("备份文件已改变，请重新预览".into());
+    }
+    state
+        .restore_snapshot(cloud_backup::decrypt(&bytes, &passphrase)?, strategy)
+        .await
 }
 
 #[tauri::command]
@@ -458,6 +640,8 @@ pub async fn preview_webdav_backup(
     Ok(RemoteBackupPreview {
         fingerprint: cloud_backup::fingerprint(&bytes),
         server_count: snapshot.profiles.len(),
+        settings: snapshot.settings.clone(),
+        needs_attention: backup_attention(&snapshot),
     })
 }
 
@@ -473,26 +657,9 @@ pub async fn backup_to_webdav(
     let _operation = state.operations.lock().await;
     state.ensure_active()?;
     let client = cloud_backup::webdav_client(&url)?;
-    let profiles = {
-        let store = state.store()?;
-        store
-            .profiles()
-            .iter()
-            .map(|p| {
-                store
-                    .resolve(&p.id)
-                    .map(cloud_backup::BackupProfile::from_resolved)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    let count = profiles.len();
-    let bytes = cloud_backup::encrypt(
-        &cloud_backup::Snapshot {
-            version: 1,
-            profiles,
-        },
-        &passphrase,
-    )?;
+    let snapshot = state.backup_snapshot()?;
+    let count = snapshot.profiles.len();
+    let bytes = cloud_backup::encrypt(&snapshot, &passphrase)?;
     let fingerprint = cloud_backup::fingerprint(&bytes);
     cloud_backup::upload(
         &client,
@@ -506,6 +673,8 @@ pub async fn backup_to_webdav(
     Ok(RemoteBackupPreview {
         fingerprint,
         server_count: count,
+        settings: snapshot.settings,
+        needs_attention: 0,
     })
 }
 
@@ -528,13 +697,7 @@ pub async fn restore_webdav_backup(
         return Err("远端备份已改变，请重新预览".into());
     }
     let snapshot = cloud_backup::decrypt(&bytes, &passphrase)?;
-    let profiles: Vec<_> = snapshot
-        .profiles
-        .into_iter()
-        .map(cloud_backup::BackupProfile::into_profile)
-        .collect();
-    crate::storage::validate_profiles(&profiles, true)?;
     state
-        .commit_and_sync(|core| core.store()?.apply(profiles, ImportStrategy::Replace))
+        .restore_snapshot(snapshot, ImportStrategy::Replace)
         .await
 }

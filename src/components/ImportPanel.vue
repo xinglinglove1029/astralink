@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { webMode } from '../webBridge'
 import { computed, onUnmounted, ref, watch } from 'vue'
-import type { AstralinkController } from '../controller'
+import type { AstraLinkController } from '../controller'
 import { inspectImport, needsCredential, sourceLabels } from '../domain'
 import type { SourceKind } from '../types'
 import Icon from './Icon.vue'
-const props = defineProps<{ dock: AstralinkController }>()
+const props = defineProps<{ dock: AstraLinkController }>()
 const { state } = props.dock
 const kind = ref<SourceKind>('xshell')
 const filePath = ref('')
@@ -70,10 +71,10 @@ onUnmounted(() => { active = false; pickRevision++; props.dock.clearPreview() })
 <template>
   <div class="import-layout">
     <section class="card import-main">
-      <div class="section-heading"><span class="step-number">1</span><div><h3>选择连接来源</h3><p>导入配置后，在星枢 Astralink 统一维护。</p></div></div>
+      <div class="section-heading"><span class="step-number">1</span><div><h3>选择连接来源</h3><p>导入配置后，在AstraLink 统一维护。</p></div></div>
       <div class="source-grid"><button v-for="source in sources" :key="source.kind" :class="['source-card', { active: kind === source.kind }]" :disabled="!!state.mutation || picking" @click="changeSource(source.kind)"><span class="source-logo"><Icon :name="source.icon" :size="22" /></span><strong>{{ sourceLabels[source.kind] }}</strong><small>{{ source.note }}</small><Icon v-if="kind === source.kind" name="check" :size="15" class="source-check" /></button></div>
-      <div class="file-drop"><span class="file-drop-icon"><Icon name="folder" :size="25" /></span><div><h4>选择 {{ sourceLabels[kind] }} 连接配置</h4><p>{{ kind === 'netcatty' ? '请先从 Netcatty 导出 CSV 文件。' : kind === 'xshell' ? '选择会话目录批量导入，或选择 .xsh 文件 / .xts 导出包。' : kind === 'finalshell' ? '选择 FinalShell 的 conn 目录；加密密码需重新填写。' : kind === 'nyaterm' ? '选择本机 .redb 或 v1 JSON 配置；数据库凭据需补齐。' : kind === 'windterm' ? '选择 user.sessions；启用主密码时需输入后预览。' : kind === 'termius' ? '选择本机 IndexedDB 目录；读取当前系统凭据库中的 localKey。' : kind === 'nya-backup' ? '选择 .nya 加密备份并输入备份密码，仅提取 SSH 连接。' : '通过本机文件选择器读取，不上传到云端。' }}</p></div><div class="file-picker-actions"><button v-if="kind === 'xshell' || kind === 'finalshell'" class="button secondary" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @click="chooseFile('directory')"><Icon name="folder" :size="14" />选择目录</button><button class="button secondary" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @click="chooseFile('file')"><span v-if="picking" class="spinner" />{{ picking ? '选择中…' : kind === 'termius' ? '选择目录' : '选择文件' }}</button></div></div>
-      <div class="path-row"><label class="sr-only" for="import-path">导入文件路径</label><input id="import-path" v-model="filePath" class="mono" placeholder="或输入本机配置路径" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @input="pathChanged" /><button class="button secondary" :disabled="!filePath.trim() || !state.desktop || !state.ready || state.previewBusy || !!state.mutation || picking" @click="previewSource(kind, filePath)"><span v-if="state.previewBusy" class="spinner" />预览</button></div>
+      <div class="file-drop"><span class="file-drop-icon"><Icon name="folder" :size="25" /></span><div><h4>选择 {{ sourceLabels[kind] }} 连接配置</h4><p>{{ webMode ? '选择配置文件上传并预览；目录型来源请先导出为单个文件。' : kind === 'netcatty' ? '请先从 Netcatty 导出 CSV 文件。' : kind === 'xshell' ? '选择会话目录批量导入，或选择 .xsh 文件 / .xts 导出包。' : kind === 'finalshell' ? '选择 FinalShell 的 conn 目录；加密密码需重新填写。' : kind === 'nyaterm' ? '选择本机 .redb 或 v1 JSON 配置；数据库凭据需补齐。' : kind === 'windterm' ? '选择 user.sessions；启用主密码时需输入后预览。' : kind === 'termius' ? '选择本机 IndexedDB 目录；读取当前系统凭据库中的 localKey。' : kind === 'nya-backup' ? '选择 .nya 加密备份并输入备份密码，仅提取 SSH 连接。' : '通过本机文件选择器读取，不上传到云端。' }}</p></div><div class="file-picker-actions"><button v-if="!webMode && (kind === 'xshell' || kind === 'finalshell')" class="button secondary" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @click="chooseFile('directory')"><Icon name="folder" :size="14" />选择目录</button><button class="button secondary" :disabled="!state.desktop || !state.ready || !!state.mutation || picking || (webMode && kind === 'termius')" @click="chooseFile('file')"><span v-if="picking" class="spinner" />{{ picking ? '选择中…' : kind === 'termius' ? '选择目录' : '选择文件' }}</button></div></div>
+      <div class="path-row"><label class="sr-only" for="import-path">导入文件路径</label><input id="import-path" v-model="filePath" class="mono" :placeholder="webMode ? '请选择文件' : '或输入本机配置路径'" :readonly="webMode" :disabled="!state.desktop || !state.ready || !!state.mutation || picking" @input="pathChanged" /><button class="button secondary" :disabled="!filePath.trim() || !state.desktop || !state.ready || state.previewBusy || !!state.mutation || picking" @click="previewSource(kind, filePath)"><span v-if="state.previewBusy" class="spinner" />预览</button></div>
       <label v-if="kind === 'windterm' || kind === 'nya-backup'" class="field"><span>{{ kind === 'windterm' ? 'WindTerm 主密码（如已启用）' : 'NyaTerm 备份密码' }}</span><input v-model="importPassword" type="password" autocomplete="off" :disabled="!state.desktop || !state.ready || state.previewBusy || !!state.mutation" /><small>仅用于本次预览，不保存密码。</small></label>
       <p v-if="localError" class="field-error" role="alert">{{ localError }}</p>
       <div class="import-divider" />

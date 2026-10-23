@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { AstralinkController } from '../controller'
+import type { AstraLinkController } from '../controller'
 import { filterRuntimeLogs, formatRuntimeLogs } from '../runtimeLogs'
 import Icon from './Icon.vue'
-const props = defineProps<{ dock: AstralinkController }>()
+const props = defineProps<{ dock: AstraLinkController }>()
 const { state } = props.dock
 const level = ref('')
 const profileId = ref('')

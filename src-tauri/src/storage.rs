@@ -181,10 +181,21 @@ impl AppStore {
     }
     pub fn apply(
         &mut self,
-        mut incoming: Vec<ConnectionProfile>,
+        incoming: Vec<ConnectionProfile>,
         strategy: ImportStrategy,
     ) -> Result<Vec<ConnectionProfile>, String> {
+        self.apply_with_settings(incoming, strategy, None)
+    }
+    pub fn apply_with_settings(
+        &mut self,
+        mut incoming: Vec<ConnectionProfile>,
+        strategy: ImportStrategy,
+        settings: Option<AppSettings>,
+    ) -> Result<Vec<ConnectionProfile>, String> {
         recover_journal(&self.directory, self.secrets.as_ref())?;
+        if settings.as_ref().is_some_and(|value| value.mcp_port == 0) {
+            return Err("MCP 端口应为 1–65535".into());
+        }
         let mut incoming_ids = HashSet::new();
         for p in &mut incoming {
             if p.id.is_empty() {
@@ -254,7 +265,7 @@ impl AppStore {
         }
         let candidate = StoredState {
             profiles,
-            settings: self.settings(),
+            settings: settings.unwrap_or_else(|| self.settings()),
         };
         let marker = if changes.is_empty() {
             None

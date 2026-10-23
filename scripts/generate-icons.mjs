@@ -45,7 +45,7 @@ try {
   for (const name of ['32x32.png', '64x64.png', '128x128.png', '128x128@2x.png', 'icon.png', 'icon.ico', 'icon.icns']) {
     copyFileSync(join(temporary, name), join(root, 'src-tauri/icons', name));
   }
-  console.log('Astralink 桌面图标已更新');
+  console.log('AstraLink 桌面图标已更新');
 } finally {
   if (dirname(resolve(temporary)) !== resolve(tmpdir()) || !basename(temporary).startsWith('astralink-icons-')) {
     throw new Error('拒绝清理图标临时目录之外的路径');

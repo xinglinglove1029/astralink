@@ -1,4 +1,4 @@
-# Astralink validation (2026-10-14)
+# AstraLink validation (2026-10-14)
 
 This is a snapshot of checks run on the developer Windows machine. Do not infer that the imported hosts are generally reachable or that deployment operations were tested.
 
@@ -11,8 +11,8 @@ This is a snapshot of checks run on the developer Windows machine. Do not infer 
 - Real HTTP MCP client using the authorized `192.168.97.166` private-key connection: tools/list returned 10; read-only `hostname && id && uname -s` returned hostname and Linux user info.
 - Native debug Tauri app started, connected to localhost control service, and discovered local Tabby/Xshell/Netcatty/OpenSSH source locations. Native preview of 21 Tabby profiles and 5 existing SSH MCP JSON profiles succeeded; no real passwords were sent to the webview preview.
 - Native test (isolated local data directory) against an SSH loopback server emitted an OTP dialog. Submitting the correct code returned '测试通过'; after importing an authorized existing private-key profile, the Rust→Node engine connection test completed successfully (read-only hostname/id).
-- One-click Codex registration was tested against an isolated CODEX_HOME. A separate Codex app-server process discovered 10 Astralink MCP tools from the registered localhost URL. The user's real Codex config was not modified by this validation.
-- Windows NSIS package produced at `src-tauri/target/release/bundle/nsis/Astralink_0.1.0_x64-setup.exe` (28.12 MiB). Silent installation into an isolated directory confirmed bundled Node runtime and engine files. The installed app started its MCP engine and rendered the per-client Codex guide with a placeholder, after Windows extended-length resource paths were normalized for Node.
+- One-click Codex registration was tested against an isolated CODEX_HOME. A separate Codex app-server process discovered 10 AstraLink MCP tools from the registered localhost URL. The user's real Codex config was not modified by this validation.
+- Windows NSIS package produced at `src-tauri/target/release/bundle/nsis/AstraLink_0.1.0_x64-setup.exe` (28.12 MiB). Silent installation into an isolated directory confirmed bundled Node runtime and engine files. The installed app started its MCP engine and rendered the per-client Codex guide with a placeholder, after Windows extended-length resource paths were normalized for Node.
 
 ## Boundaries
 

@@ -226,6 +226,11 @@ impl EngineManager {
             *emitter = Some(app)
         }
     }
+    pub async fn pending_challenges(&self) -> Vec<AuthChallenge> {
+        let mut runtime = self.inner.lock().await;
+        runtime.pending.retain(|_, event| event.expires_at > now());
+        runtime.pending.values().cloned().collect()
+    }
     fn emit_status(&self, status: &EngineStatus) {
         if let Ok(app) = self.emitter.lock() {
             if let Some(app) = app.as_ref() {
@@ -346,7 +351,7 @@ impl EngineManager {
                 return Err(NODE_INSTALL_HINT.into());
             }
             if !self.paths.entry.is_file() {
-                return Err("MCP 引擎资源不存在，请重新安装 Astralink".into());
+                return Err("MCP 引擎资源不存在，请重新安装 AstraLink".into());
             }
             let listener = std::net::TcpListener::bind(("127.0.0.1", runtime.port))
                 .map_err(|_| "MCP 端口已被占用")?;
@@ -415,7 +420,7 @@ impl EngineManager {
                         "service_node_missing"
                     } else if error == "MCP 端口已被占用" {
                         "service_port_busy"
-                    } else if error == "MCP 引擎资源不存在，请重新安装 Astralink" {
+                    } else if error == "MCP 引擎资源不存在，请重新安装 AstraLink" {
                         "service_entry_missing"
                     } else {
                         "service_failed"

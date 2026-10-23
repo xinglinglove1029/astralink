@@ -1,4 +1,4 @@
-use crate::models::ConnectionProfile;
+use crate::models::{AppSettings, ConnectionProfile};
 use argon2::Argon2;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chacha20poly1305::{
@@ -15,6 +15,8 @@ const MAX_BYTES: usize = 16 * 1024 * 1024;
 pub struct Snapshot {
     pub version: u8,
     pub profiles: Vec<BackupProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<AppSettings>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,6 +66,10 @@ fn key(passphrase: &str, salt: &[u8]) -> Result<[u8; 32], String> {
 }
 
 pub fn encrypt(snapshot: &Snapshot, passphrase: &str) -> Result<Vec<u8>, String> {
+    if !matches!(snapshot.version, 1 | 2) || (snapshot.version == 2 && snapshot.settings.is_none())
+    {
+        return Err("备份版本不受支持".into());
+    }
     let plaintext = serde_json::to_vec(snapshot).map_err(|_| "无法序列化备份".to_string())?;
     if plaintext.len() > MAX_BYTES {
         return Err("备份内容超过大小限制".into());
@@ -79,7 +85,7 @@ pub fn encrypt(snapshot: &Snapshot, passphrase: &str) -> Result<Vec<u8>, String>
         .encrypt(XNonce::from_slice(&nonce), plaintext.as_ref())
         .map_err(|_| "无法加密备份".to_string())?;
     serde_json::to_vec(&Envelope {
-        format: "astralink-backup-v1".into(),
+        format: format!("astralink-backup-v{}", snapshot.version),
         salt: STANDARD.encode(salt),
         nonce: STANDARD.encode(nonce),
         ciphertext: STANDARD.encode(ciphertext),
@@ -93,7 +99,10 @@ pub fn decrypt(bytes: &[u8], passphrase: &str) -> Result<Snapshot, String> {
     }
     let envelope: Envelope =
         serde_json::from_slice(bytes).map_err(|_| "备份格式无效".to_string())?;
-    if envelope.format != "astralink-backup-v1" {
+    if !matches!(
+        envelope.format.as_str(),
+        "astralink-backup-v1" | "astralink-backup-v2"
+    ) {
         return Err("备份版本不受支持".into());
     }
     let salt = STANDARD
@@ -116,7 +125,11 @@ pub fn decrypt(bytes: &[u8], passphrase: &str) -> Result<Snapshot, String> {
         .map_err(|_| "备份口令不正确或内容已损坏".to_string())?;
     let snapshot: Snapshot =
         serde_json::from_slice(&plaintext).map_err(|_| "备份内容无效".to_string())?;
-    if snapshot.version != 1 || snapshot.profiles.len() > 1000 {
+    if envelope.format != format!("astralink-backup-v{}", snapshot.version)
+        || !matches!(snapshot.version, 1 | 2)
+        || (snapshot.version == 2 && snapshot.settings.is_none())
+        || snapshot.profiles.len() > 1000
+    {
         return Err("备份内容不受支持".into());
     }
     Ok(snapshot)
@@ -241,6 +254,7 @@ mod tests {
         let snapshot = Snapshot {
             version: 1,
             profiles: vec![BackupProfile::from_resolved(profile)],
+            settings: None,
         };
         let encrypted = encrypt(&snapshot, "fixture-passphrase-123").unwrap();
         assert!(!String::from_utf8_lossy(&encrypted).contains("sensitive-fixture"));
@@ -272,6 +286,38 @@ mod tests {
             "fixture-passphrase-123"
         )
         .is_err());
+    }
+    #[test]
+    fn version_two_preserves_settings_and_version_one_remains_readable() {
+        let settings = AppSettings {
+            mcp_port: 19333,
+            start_on_launch: true,
+            minimize_to_tray: false,
+        };
+        let bytes = encrypt(
+            &Snapshot {
+                version: 2,
+                profiles: vec![],
+                settings: Some(settings.clone()),
+            },
+            "long-test-passphrase",
+        )
+        .unwrap();
+        let restored = decrypt(&bytes, "long-test-passphrase").unwrap();
+        assert_eq!(restored.settings, Some(settings));
+        let old = encrypt(
+            &Snapshot {
+                version: 1,
+                profiles: vec![],
+                settings: None,
+            },
+            "long-test-passphrase",
+        )
+        .unwrap();
+        assert!(decrypt(&old, "long-test-passphrase")
+            .unwrap()
+            .settings
+            .is_none());
     }
     #[test]
     fn webdav_endpoint_requires_https_without_embedded_credentials() {

@@ -15,6 +15,7 @@ pub mod runtime_logs;
 pub mod sqlite_store;
 pub mod storage;
 pub mod tabby_credentials;
+pub mod web_server;
 
 use commands::AppCore;
 use std::path::PathBuf;
@@ -112,12 +113,15 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::preview_webdav_backup,
             commands::backup_to_webdav,
             commands::restore_webdav_backup,
+            commands::export_backup_file,
+            commands::preview_backup_file,
+            commands::restore_backup_file,
         ])
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     match builder().build(tauri::generate_context!()) {
         Ok(app) => app.run(desktop::run_event),
-        Err(_) => eprintln!("Astralink 启动失败，请检查应用数据和桌面运行环境"),
+        Err(_) => eprintln!("AstraLink 启动失败，请检查应用数据和桌面运行环境"),
     }
 }

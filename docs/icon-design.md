@@ -1,4 +1,4 @@
-# Astralink 图标
+# AstraLink 图标
 
 图形采用「星核 + 连接轨道」：四角星表示星枢，单条倾斜轨道与两端节点表示连接汇聚。桌面版本使用深海蓝圆角底、薄荷青轨道和浅色星核；界面版本使用相同轮廓，跟随当前主题色。
 
@@ -25,4 +25,4 @@ node scripts/generate-icons.mjs
 npm run desktop:build
 ```
 
-输出位于 `src-tauri/target/release/bundle/nsis/Astralink_0.1.0_x64-setup.exe`。macOS 与 Linux 图标资源已生成，平台安装包需在对应构建环境验证。
+输出位于 `src-tauri/target/release/bundle/nsis/AstraLink_0.1.0_x64-setup.exe`。macOS 与 Linux 图标资源已生成，平台安装包需在对应构建环境验证。

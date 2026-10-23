@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Astralink",
-  "mainBinaryName": "Astralink",
-  "version": "0.1.1",
+  "productName": "AstraLink",
+  "mainBinaryName": "AstraLink",
+  "version": "0.1.2",
   "identifier": "dev.astralink.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "星枢 · Astralink",
+        "title": "星枢 · AstraLink",
         "width": 1320,
         "height": 860,
         "minWidth": 1080,

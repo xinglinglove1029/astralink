@@ -17,9 +17,9 @@ describe('MCP client connection guides', () => {
     expect(cherry.command).toBe('<ASTRALINK_NODE_PATH>')
     expect(cherry.args).toEqual(['<ASTRALINK_BRIDGE_PATH>'])
     expect(cherry.env.ASTRALINK_MCP_TOKEN).toBe('<ASTRALINK_MCP_TOKEN>')
-    const resolved = JSON.parse(createClientSnippet('cherry-studio', 18766, { nodePath: 'C:/Astralink/node.exe', scriptPath: 'C:/Astralink/stdio-bridge.mjs' })!).mcpServers.astralink
-    expect(resolved.command).toBe('C:/Astralink/node.exe')
-    expect(resolved.args).toEqual(['C:/Astralink/stdio-bridge.mjs'])
+    const resolved = JSON.parse(createClientSnippet('cherry-studio', 18766, { nodePath: 'C:/AstraLink/node.exe', scriptPath: 'C:/AstraLink/stdio-bridge.mjs' })!).mcpServers.astralink
+    expect(resolved.command).toBe('C:/AstraLink/node.exe')
+    expect(resolved.args).toEqual(['C:/AstraLink/stdio-bridge.mjs'])
     expect(resolved.env.ASTRALINK_MCP_TOKEN).toBe('<ASTRALINK_MCP_TOKEN>')
   })
 

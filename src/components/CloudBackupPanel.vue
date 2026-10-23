@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
-import { desktopBridge } from '../api'
-import type { AstralinkController } from '../controller'
+import { activeBridge, desktopBridge } from '../api'
+import { webMode } from '../webBridge'
+import type { AstraLinkController } from '../controller'
 import Icon from './Icon.vue'
 
-const props = defineProps<{ dock: AstralinkController }>()
+const props = defineProps<{ dock: AstraLinkController }>()
 function savedTarget(): { url: string; username: string } {
   try {
     const value = JSON.parse(localStorage.getItem('astralink-webdav-target') ?? '{}')
@@ -17,6 +18,47 @@ const overwrite = ref(false)
 const confirmRestore = ref(false)
 const busy = ref(false)
 const message = ref('')
+const localFile = ref('')
+const localPreview = ref<{ fingerprint: string; serverCount: number; settings?: { mcpPort: number }; needsAttention: number }>()
+const localStrategy = ref<'merge' | 'replace'>('merge')
+const confirmLocal = ref(false)
+watch(() => form.passphrase, () => { localPreview.value = undefined; confirmLocal.value = false })
+
+async function exportLocal() {
+  if (busy.value || form.passphrase.length < 12) return
+  const filePath = await activeBridge.saveBackupFile?.()
+  if (!filePath) return
+  busy.value = true
+  try {
+    await activeBridge.invoke('export_backup_file', { filePath, passphrase: form.passphrase })
+    message.value = '加密备份已导出。'
+  } catch (error) { message.value = String(error) }
+  finally { busy.value = false }
+}
+async function chooseLocal() {
+  const filePath = await activeBridge.pickBackupFile?.()
+  if (filePath) { localFile.value = filePath; localPreview.value = undefined; confirmLocal.value = false }
+}
+async function previewLocal() {
+  if (busy.value || !localFile.value) return
+  busy.value = true
+  try {
+    localPreview.value = await activeBridge.invoke('preview_backup_file', { filePath: localFile.value, passphrase: form.passphrase })
+    message.value = `备份包含 ${localPreview.value.serverCount} 台连接。`
+  } catch (error) { message.value = String(error) }
+  finally { busy.value = false }
+}
+async function restoreLocal() {
+  if (busy.value || !confirmLocal.value || !localPreview.value) return
+  busy.value = true
+  try {
+    await activeBridge.invoke('restore_backup_file', { filePath: localFile.value, passphrase: form.passphrase, expectedFingerprint: localPreview.value.fingerprint, strategy: localStrategy.value })
+    await props.dock.refreshAppState()
+    message.value = '备份已导入。'
+    localPreview.value = undefined; confirmLocal.value = false
+  } catch (error) { message.value = String(error) }
+  finally { busy.value = false }
+}
 
 watch(form, () => { preview.value = undefined; overwrite.value = false; confirmRestore.value = false; message.value = '' })
 watch(() => [form.url, form.username], () => {
@@ -67,21 +109,35 @@ async function restore() {
 
 <template>
   <section class="card settings-card backup-panel">
-    <div class="section-heading"><span class="section-icon"><Icon name="server" :size="21" /></span><div><h3>远端备份</h3><p>WebDAV 加密快照，手动上传与恢复。</p></div></div>
+    <div class="section-heading"><span class="section-icon"><Icon name="download" :size="21" /></span><div><h3>配置迁移</h3><p>导出或导入 AstraLink 加密备份。</p></div></div>
+    <label class="field"><span>备份口令</span><input v-model="form.passphrase" type="password" autocomplete="off" minlength="12" :disabled="busy" /></label>
+    <div class="button-row backup-actions">
+      <button class="button secondary" :disabled="busy || !dock.state.desktop || !dock.state.ready || form.passphrase.length < 12" @click="exportLocal"><Icon name="download" :size="15" />导出备份</button>
+      <button class="button secondary" :disabled="busy || !dock.state.desktop || !dock.state.ready" @click="chooseLocal"><Icon name="folder" :size="15" />选择备份</button>
+      <button class="button secondary" :disabled="busy || !localFile || form.passphrase.length < 12" @click="previewLocal">预览导入</button>
+    </div>
+    <p v-if="localFile" class="storage-note mono break-text">{{ localFile }}</p>
+    <template v-if="localPreview">
+      <p class="storage-note">{{ localPreview.serverCount }} 台连接{{ localPreview.settings ? `；包含应用设置（MCP 端口 ${localPreview.settings.mcpPort}）` : '；旧版备份无应用设置' }}。{{ localPreview.needsAttention ? `${localPreview.needsAttention} 台使用当前机器不存在的私钥或传输目录，导入后将停用并需重新配置。` : '私钥文件不会打包。' }}</p>
+      <label class="field"><span>导入方式</span><select v-model="localStrategy" :disabled="busy"><option value="merge">合并连接</option><option value="replace">替换所有连接</option></select></label>
+      <label class="check-row"><input v-model="confirmLocal" type="checkbox" />确认导入并应用可迁移设置</label>
+      <button class="button primary" :disabled="busy || !confirmLocal" @click="restoreLocal">导入备份</button>
+    </template>
+    <p class="storage-note">备份含连接凭据与动态密钥，不含私钥文件、MCP 令牌和登录信息。仅在受信任设备保存备份。</p>
+    <template v-if="!webMode"><div class="section-heading"><span class="section-icon"><Icon name="server" :size="21" /></span><div><h3>远端备份</h3><p>WebDAV 加密快照，手动上传与恢复。</p></div></div>
     <div class="backup-fields">
       <label class="field"><span>HTTPS WebDAV 文件地址</span><input v-model.trim="form.url" :disabled="busy" type="url" placeholder="https://dav.example.com/astralink.backup" autocomplete="off" /></label>
       <label class="field"><span>账号</span><input v-model="form.username" :disabled="busy" autocomplete="off" /></label>
       <label class="field"><span>WebDAV 密码</span><input v-model="form.password" :disabled="busy" type="password" autocomplete="off" /></label>
-      <label class="field"><span>备份口令</span><input v-model="form.passphrase" :disabled="busy" type="password" autocomplete="off" minlength="12" /></label>
     </div>
-    <p class="storage-note">地址和账号仅保存在本机；WebDAV 密码与备份口令不保存。备份口令丢失后无法解密；快照包含连接凭据，不包含本机私钥文件、MCP 令牌及应用设置。</p>
+    <p class="storage-note">地址和账号仅保存在本机；WebDAV 密码与备份口令不保存。备份口令丢失后无法解密；新版快照包含应用设置，旧版仍可恢复。</p>
     <div class="button-row backup-actions">
       <button class="button secondary" :disabled="busy || !dock.state.desktop || !dock.state.ready || !form.url || form.passphrase.length < 12" @click="read">查看远端</button>
       <button class="button primary" :disabled="busy || !dock.state.desktop || !dock.state.ready || !form.url || form.passphrase.length < 12 || (!!preview && !overwrite)" @click="upload">加密上传</button>
       <button class="button secondary" :disabled="busy || !dock.state.desktop || !dock.state.ready || !preview || !confirmRestore" @click="restore">恢复连接</button>
     </div>
     <label v-if="preview" class="check-row"><input v-model="overwrite" type="checkbox" />覆盖已预览的远端版本</label>
-    <label v-if="preview" class="check-row"><input v-model="confirmRestore" type="checkbox" />确认用远端 {{ preview.serverCount }} 台连接替换本机连接</label>
+    <label v-if="preview" class="check-row"><input v-model="confirmRestore" type="checkbox" />确认用远端 {{ preview.serverCount }} 台连接替换本机连接</label></template>
     <p v-if="message" class="storage-note" role="status">{{ message }}</p>
   </section>
 </template>

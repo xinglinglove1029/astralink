@@ -3,12 +3,13 @@ import Icon from './Icon.vue'
 import NexusMark from './NexusMark.vue'
 import type { EngineStatus } from '../types'
 import { version as appVersion } from '../../package.json'
+import { webMode } from '../webBridge'
 defineProps<{ page: string; group: string; groups: { name: string; count: number }[]; total: number; engine: EngineStatus; desktop: boolean }>()
 const emit = defineEmits<{ navigate: [page: string]; group: [group: string] }>()
 </script>
 <template>
   <aside class="sidebar">
-    <a class="brand" href="#" aria-label="星枢 Astralink 首页" @click.prevent="emit('navigate', 'dashboard')"><span class="brand-mark"><NexusMark :size="31"/></span><span class="brand-wordmark"><strong>星枢</strong><small>ASTRALINK</small></span></a>
+    <a class="brand" href="#" aria-label="AstraLink 首页" @click.prevent="emit('navigate', 'dashboard')"><span class="brand-mark"><NexusMark :size="31"/></span><span class="brand-wordmark"><strong>AstraLink</strong><small>SSH · MCP</small></span></a>
     <div class="sidebar-label">工作空间 / WORKSPACE</div>
     <nav aria-label="主导航">
       <button :class="['nav-item', { active: page === 'dashboard' }]" @click="emit('navigate', 'dashboard')"><Icon name="globe"/><span>连接总览<small>OVERVIEW</small></span></button>
@@ -25,8 +26,8 @@ const emit = defineEmits<{ navigate: [page: string]; group: [group: string] }>()
     </div>
     <div class="sidebar-bottom">
       <div class="sidebar-service"><span :class="['status-dot', { live: desktop && engine.running }]" /><span>{{ !desktop ? '桌面应用未连接' : engine.running ? 'MCP 服务运行中' : 'MCP 服务未启动' }}</span></div>
-      <p>本机运行 · SSH 连接由你掌控</p>
-      <div class="sidebar-version"><span class="mini-mark"><NexusMark :size="19"/></span><span>星枢 <small>ASTRALINK · v{{ appVersion }}</small></span><Icon name="shield" :size="16" /></div>
+      <p>{{ webMode ? '服务器运行 · 登录后管理连接' : '本机运行 · SSH 连接由你掌控' }}</p>
+      <div class="sidebar-version"><span class="mini-mark"><NexusMark :size="19"/></span><span>AstraLink <small>v{{ appVersion }}</small></span><Icon name="shield" :size="16" /></div>
     </div>
   </aside>
 </template>

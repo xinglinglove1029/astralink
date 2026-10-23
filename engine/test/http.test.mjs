@@ -40,7 +40,7 @@ test('profile replacement is atomic; control errors are bounded and do not expos
 });
 test('real SDK initializes stateful MCP sessions and discovers exactly upstream schemas', async (t) => {
   const engine = await start(t);
-  const client = new Client({ name: 'Astralink tests', version: '1.0' });
+  const client = new Client({ name: 'AstraLink tests', version: '1.0' });
   const transport = new StreamableHTTPClientTransport(new URL(engine.url + '/mcp'), { requestInit: { headers: { authorization: 'Bearer ' + tokens.mcpToken } } });
   await client.connect(transport);
   t.after(() => client.close());

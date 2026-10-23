@@ -65,7 +65,7 @@ export async function fakeSsh(options = {}) {
         return context.accept();
       if (context.method !== 'keyboard-interactive')
         return context.reject(['keyboard-interactive']);
-      context.prompt(options.prompts ?? [{ prompt: 'Verification code: ', echo: false }], 'Astralink test', 'Enter current code', responses => {
+      context.prompt(options.prompts ?? [{ prompt: 'Verification code: ', echo: false }], 'AstraLink test', 'Enter current code', responses => {
         seen.responses.push(responses);
         if (responses.at(-1) === (options.code ?? '654321'))
           context.accept();

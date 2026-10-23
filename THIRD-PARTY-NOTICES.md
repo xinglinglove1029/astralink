@@ -1,6 +1,6 @@
 # THIRD-PARTY NOTICES
 
-Astralink uses the following main upstream components. Distributed runtime resources include upstream license files. Dependency lockfiles record exact resolved versions.
+AstraLink uses the following main upstream components. Distributed runtime resources include upstream license files. Dependency lockfiles record exact resolved versions.
 
 - classfang/ssh-mcp-server / @fangjunjie/ssh-mcp-server 1.10.0: ISC License, Copyright (c) 2025 junki.cn.
 - Node.js: Node.js and its bundled components use their own licenses; include the Node LICENSE file with the runtime.

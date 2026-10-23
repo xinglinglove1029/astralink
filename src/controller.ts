@@ -3,7 +3,7 @@ import type { DesktopBridge } from './api'
 import { inspectImport, normalizeProfile, stripSecrets, validateProfile, validateSettings } from './domain'
 import type { AppSettings, AuthChallenge, CodexRegistration, ConnectionProfile, ConnectionTest, EngineStatus, ImportPreview, SourceCandidate, SourceKind, RuntimeLogSnapshot, StorageInfo } from './types'
 
-export function createAstralink(bridge: DesktopBridge) {
+export function createAstraLink(bridge: DesktopBridge) {
   const state = reactive({
     desktop: bridge.available, loading: false, ready: false,
     profiles: [] as ConnectionProfile[], sources: [] as SourceCandidate[],
@@ -32,7 +32,7 @@ export function createAstralink(bridge: DesktopBridge) {
   let engineKnown = false
   const unlisteners: (() => void)[] = []
   const nativeRequired = () => {
-    if (!state.desktop) { state.notice = { kind: 'info', text: '请在星枢 Astralink 桌面应用中执行此操作' }; return true }
+    if (!state.desktop) { state.notice = { kind: 'info', text: '请在AstraLink 桌面应用中执行此操作' }; return true }
     return disposed
   }
   function report(error: unknown, secrets: (string | undefined)[] = []) {
@@ -380,4 +380,4 @@ export function createAstralink(bridge: DesktopBridge) {
   }
   return { state, initialize, refreshAppState, discoverSources, clearPreview, previewImport, saveProfile, revealProfileSecret, deleteProfile, deleteProfiles, applyImport, saveSettings, setEngine, refreshEngine, registerCodex, registerClient, testConnection, submitOtp, cancelAuth, dispose, refreshRuntimeLogs, exportRuntimeLogs, refreshStorageInfo, pickFile: bridge.pickFile, pickClientConfig: () => bridge.pickFile(undefined, 'config'), report }
 }
-export type AstralinkController = ReturnType<typeof createAstralink>
+export type AstraLinkController = ReturnType<typeof createAstraLink>

@@ -11,7 +11,7 @@ export type UpdateResult =
 function hasInstaller(assets: unknown, platform: string, version: string): boolean {
   if (!Array.isArray(assets)) return false
   const names = assets.flatMap((asset) => typeof asset?.name === 'string' ? [asset.name] : [])
-    .filter((name) => name.startsWith(`Astralink_${version}_`))
+    .filter((name) => [`AstraLink_${version}_`, `Astralink_${version}_`].some((prefix) => name.startsWith(prefix)))
   if (platform.includes('Win')) return names.some((name) => /_x64-setup\.exe$/i.test(name))
   if (platform.includes('Mac')) return names.some((name) => /_(?:aarch64|x64)\.dmg$/i.test(name))
   if (platform.includes('Linux')) return names.some((name) => /\.(?:AppImage|deb)$/i.test(name))

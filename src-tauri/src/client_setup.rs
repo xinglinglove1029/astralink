@@ -71,7 +71,7 @@ fn object_mut<'a>(
         .as_object_mut()
         .ok_or("客户端配置节点必须是对象，原文件已保留".into())
 }
-/// Updates only the Astralink entry. Never includes config contents or secrets in errors.
+/// Updates only the AstraLink entry. Never includes config contents or secrets in errors.
 pub fn register(
     client: &str,
     path: &Path,
@@ -145,7 +145,7 @@ pub fn register_with_bridge(
         .get("astralink")
         .is_some_and(|entry| !entry.is_object())
     {
-        return Err("已有 Astralink 配置必须是对象，原文件已保留".into());
+        return Err("已有 AstraLink 配置必须是对象，原文件已保留".into());
     }
     let owned_previous = servers
         .get(crate::migration::LEGACY_CLIENT_KEY)

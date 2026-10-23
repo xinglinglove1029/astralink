@@ -81,7 +81,7 @@ pub(crate) fn open(directory: &Path) -> Result<(Connection, StoredState), String
             let state = read(&db)?;
             Ok((db, state))
         }
-        _ => Err("数据库版本不受支持，请使用匹配版本的 Astralink".into()),
+        _ => Err("数据库版本不受支持，请使用匹配版本的 AstraLink".into()),
     }
 }
 fn save_rows(db: &Connection, state: &StoredState) -> Result<(), String> {

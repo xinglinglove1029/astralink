@@ -1,4 +1,4 @@
-# Astralink API contract
+# AstraLink API contract
 
 JSON uses camelCase. IDs are UUIDs. All user-facing labels are concise Chinese. Runtime secrets do not appear in diagnostic output or persisted metadata; optional password/passphrase inputs are extracted into OS credentials before saving.
 
@@ -25,6 +25,10 @@ interface ConnectionTest { status:'connected'|'partial'|'auth_required'|'failed'
 ```
 
 ## Tauri commands
+
+桌面与服务器均支持 AstraLink 自身加密快照。`export_backup_file`、`preview_backup_file`、`restore_backup_file` 在桌面使用本地绝对路径；服务器版通过登录保护的下载/上传 API 传输文件，不接受浏览器提供的任意服务器路径。快照 v2 包含 profiles 和 settings；v1 仍可恢复连接。导入时缺失的私钥或本地传输目录会使对应连接停用。管理员登录信息、MCP 令牌和私钥文件不随备份迁移。
+
+服务器入口：`GET /api/auth/status` 查询当前会话；`POST /api/auth/login|logout|password` 管理单管理员会话。其余 `POST /api/commands/{name}` 复用配置、测试和引擎核心；写请求校验同源 Origin、HttpOnly 会话 Cookie 与 `X-AstraLink-CSRF`。`POST /api/upload/{kind}/{ext}` 上传浏览器所选的单个导入文件（十分钟预览期）或私钥，`POST /api/backup/export|preview|import` 处理加密备份。客户端注册与 MCP 访问令牌接口不暴露给浏览器。
 
 - get_app_state {} -> AppState
 - get_storage_info {} -> {backend:'sqlite',databasePath:string,legacyBackupPath:string|null,serverCount:number}; shows actual per-platform data location in Settings.
@@ -83,11 +87,11 @@ Runtime logs live in app-data/logs/runtime.jsonl (1 MiB current file plus runtim
 - get_mcp_bridge_paths {} -> {nodePath:string,scriptPath:string}; returns installed local paths only, never credentials. Desktop snippets use them with a token placeholder.
 - clientId: codex、claude-code、claude-desktop、workbuddy、cursor、vscode、windsurf、antigravity、opencode、openclaw、hermes。Claude Desktop / WorkBuddy 通过打包的 Node 和 stdio 桥接连接本机 HTTP 服务；Cherry Studio 可在自身界面导入桥接片段（桌面版填写绝对路径，令牌手动复制）；云端 ChatGPT 需 Secure MCP Tunnel 或独立 HTTPS 网关，暂不支持本机快捷接入。
 - 未指定路径时写入对应用户级配置；Codex 继续遵循已有 CODEX_HOME 配置位置。Windsurf 要求用户先选择当前实际使用的配置文件。
-- 只更新 Astralink 节点，其余设置保留。写入前创建旁路备份，再校验文件未发生变化并原子替换；错误不包含配置内容或令牌。
+- 只更新 AstraLink 节点，其余设置保留。写入前创建旁路备份，再校验文件未发生变化并原子替换；错误不包含配置内容或令牌。
 - JSON/YAML 配置按结构重新序列化；格式可能调整，YAML 注释不保留。含注释的 JSON、JSON5 和非对象节点拒绝自动写入，保留原文件，使用手动合并。
 - 自动填入本机 MCP 访问令牌；界面只回传配置和备份路径，不回传令牌。各客户端仍需重新加载 MCP。
 
-## Astralink naming and migration
+## AstraLink naming and migration
 
 All active identifiers use astralink: dev.astralink.desktop, astralink.db, astralink-auth / astralink-engine events, ASTRALINK_* environment variables and the astralink MCP client entry. Previous identifier literals exist only in migration.rs for one-way migration.
 

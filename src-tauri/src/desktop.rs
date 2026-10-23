@@ -43,18 +43,12 @@ pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
         exiting: AtomicBool::new(false),
         ready: AtomicBool::new(false),
     });
-    let show_item = MenuItem::with_id(
-        app,
-        "astralink-show",
-        "显示星枢 Astralink",
-        true,
-        None::<&str>,
-    )?;
+    let show_item = MenuItem::with_id(app, "astralink-show", "显示AstraLink", true, None::<&str>)?;
     let stop_item = MenuItem::with_id(app, "astralink-stop", "停止 MCP", true, None::<&str>)?;
     let exit_item = MenuItem::with_id(app, "astralink-exit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &stop_item, &exit_item])?;
     let mut tray = TrayIconBuilder::with_id("astralink-tray")
-        .tooltip("星枢 · Astralink")
+        .tooltip("AstraLink")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {

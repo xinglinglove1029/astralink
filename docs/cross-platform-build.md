@@ -1,6 +1,6 @@
 # 跨平台构建
 
-Astralink 使用各平台的原生构建环境，安装包包含对应操作系统和 CPU 架构的 Node 与 SSH MCP 引擎。Windows 使用系统凭据管理器，macOS 使用 Keychain，Linux 使用 Secret Service；Linux 桌面需有已解锁的 GNOME Keyring 或兼容服务。
+AstraLink 使用各平台的原生构建环境，安装包包含对应操作系统和 CPU 架构的 Node 与 SSH MCP 引擎。Windows 使用系统凭据管理器，macOS 使用 Keychain，Linux 使用 Secret Service；Linux 桌面需有已解锁的 GNOME Keyring 或兼容服务。
 
 ## GitHub Actions
 
@@ -15,7 +15,7 @@ Astralink 使用各平台的原生构建环境，安装包包含对应操作系�
 | macOS Intel | macos-15-intel | x64 `.dmg` |
 | Linux x64 | ubuntu-22.04 | `.deb`、`.AppImage` |
 
-成功后可以在运行记录的 **Artifacts** 下载 `Astralink-windows-x64`、`Astralink-macos-arm64`、`Astralink-macos-x64`、`Astralink-linux-x64`，这些临时产物保留 14 天；版本标签的安装包也会出现在 **Releases**。每个任务单独运行前端、引擎及 Rust 测试，再构建并启动资源目录中的内置 Node/引擎做控制接口验证。资源包含的是对应原生 runner 的 Node，禁止从 Windows 复制 `node.exe` 到 Linux/macOS 包。
+成功后可以在运行记录的 **Artifacts** 下载 `AstraLink-windows-x64`、`AstraLink-macos-arm64`、`AstraLink-macos-x64`、`AstraLink-linux-x64`，这些临时产物保留 14 天；版本标签的安装包也会出现在 **Releases**。每个任务单独运行前端、引擎及 Rust 测试，再构建并启动资源目录中的内置 Node/引擎做控制接口验证。资源包含的是对应原生 runner 的 Node，禁止从 Windows 复制 `node.exe` 到 Linux/macOS 包。
 
 要补发已完成但未发布的旧版本，在默认分支手动运行此工作流，同时填写 `release_tag`（如 `v0.1.0`）和 `artifact_run_id`（对应成功的标签构建运行 ID）。该模式不重新打包，会检查运行状态、来源和提交与标签一致，再从尚未过期的 Artifacts 发布；不会移动标签或覆盖已有 Release。两个输入都留空时仍只运行构建。
 
@@ -43,7 +43,7 @@ WSL 验证应在 Linux 文件系统的隔离副本中安装 Linux 原生 Node/Ru
 3. 开发版或内置 Node 缺失时，从当前系统 PATH 查找相应可执行文件，再检查常见安装目录：Windows 的 Program Files/nodejs，macOS 的 Homebrew 和 /usr/local/bin，Linux 的 /usr/local/bin、/usr/bin。
 4. 都未找到时，MCP 启动失败并明确提示安装 Node.js、加入 PATH，或设置 `ASTRALINK_NODE_BINARY`；不会伪造服务启动成功。
 
-完整安装包正常情况下无需用户另装 Node。更改系统 PATH 后重新启动 Astralink，让进程取得新的环境。构建机使用 Node 24 LTS，与工作流和二维码依赖的版本要求保持一致。
+完整安装包正常情况下无需用户另装 Node。更改系统 PATH 后重新启动 AstraLink，让进程取得新的环境。构建机使用 Node 24 LTS，与工作流和二维码依赖的版本要求保持一致。
 
 ## 本次验证记录
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createAstralink } from '../controller'
+import { createAstraLink } from '../controller'
 import { createProfile } from '../domain'
 import type { DesktopBridge } from '../api'
 import type { AppState, AuthChallenge, ConnectionProfile, ConnectionTest, EngineStatus } from '../types'
@@ -20,7 +20,7 @@ function setup(overrides: Record<string, (args?: any) => any> = {}) {
     listen: async (name, callback) => { handlers.set(name, callback); return () => handlers.delete(name) },
     pickFile: async () => null,
   }
-  return { dock: createAstralink(bridge), app, profile, handlers, calls }
+  return { dock: createAstraLink(bridge), app, profile, handlers, calls }
 }
 
 describe('async desktop state', () => {
@@ -49,7 +49,7 @@ describe('async desktop state', () => {
   it('cancels a native log export without writing a file or reporting success', async () => {
     const calls: string[] = []
     const bridge: DesktopBridge = { available:true,invoke:async command=>{ calls.push(command); return undefined as any },listen:async()=>()=>{},pickFile:async()=>null,saveLogFile:async()=>null }
-    const dock = createAstralink(bridge)
+    const dock = createAstraLink(bridge)
     dock.state.ready = true
     expect(await dock.exportRuntimeLogs()).toBe(false)
     expect(calls).toEqual([])
@@ -71,7 +71,7 @@ describe('async desktop state', () => {
   })
   it('never invokes native actions from browser preview', async () => {
     let calls = 0
-    const dock = createAstralink({ available: false, invoke: async () => { calls++; throw Error() }, listen: async () => () => {}, pickFile: async () => null })
+    const dock = createAstraLink({ available: false, invoke: async () => { calls++; throw Error() }, listen: async () => () => {}, pickFile: async () => null })
     await dock.initialize()
     await dock.setEngine(true)
     await dock.registerCodex()

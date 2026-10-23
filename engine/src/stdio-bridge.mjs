@@ -7,7 +7,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 const port = Number(process.env.ASTRALINK_MCP_PORT);
 const token = process.env.ASTRALINK_MCP_TOKEN;
 if (!Number.isInteger(port) || port < 1 || port > 65535 || !token || /[\r\n]/.test(token)) {
-  console.error('Astralink bridge configuration is invalid');
+  console.error('AstraLink bridge configuration is invalid');
   process.exit(1);
 }
 
@@ -23,7 +23,7 @@ try {
   await client.connect(remote);
   await server.connect(new StdioServerTransport());
 } catch {
-  console.error('Astralink bridge could not connect to the local MCP service');
+  console.error('AstraLink bridge could not connect to the local MCP service');
   await client.close().catch(() => {});
   process.exitCode = 1;
 }

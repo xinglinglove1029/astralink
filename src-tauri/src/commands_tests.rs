@@ -55,6 +55,71 @@ fn preview_hides_secrets_but_apply_writes_them_to_vault() {
         "preview-test-secret"
     );
 }
+#[tokio::test]
+async fn portable_backup_restores_settings_and_credentials_but_disables_missing_paths() {
+    let source = tempfile::tempdir().unwrap();
+    let source_core = core(source.path(), Vault::default());
+    let id = uuid::Uuid::new_v4().to_string();
+    let key = source.path().join("key.pem");
+    let transfer_dir = source.path().join("transfer");
+    std::fs::create_dir(&transfer_dir).unwrap();
+    std::fs::write(&key, "test key bytes").unwrap();
+    source_core
+        .store()
+        .unwrap()
+        .apply(
+            vec![ConnectionProfile {
+                id: id.clone(),
+                name: "portable".into(),
+                host: "example.invalid".into(),
+                username: "ops".into(),
+                auth_type: AuthType::PrivateKey,
+                private_key_path: Some(key.to_string_lossy().into()),
+                passphrase: Some("synthetic-passphrase".into()),
+                allowed_local_paths: Some(vec![transfer_dir.to_string_lossy().into()]),
+                ..Default::default()
+            }],
+            ImportStrategy::Merge,
+        )
+        .unwrap();
+    source_core
+        .store()
+        .unwrap()
+        .update_settings(AppSettings {
+            mcp_port: 19333,
+            start_on_launch: false,
+            minimize_to_tray: false,
+        })
+        .unwrap();
+    let bytes = cloud_backup::encrypt(
+        &source_core.backup_snapshot().unwrap(),
+        "backup-test-passphrase",
+    )
+    .unwrap();
+    std::fs::remove_file(&key).unwrap();
+    std::fs::remove_dir(&transfer_dir).unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let target_core = core(target.path(), Vault::default());
+    assert_eq!(
+        backup_preview(&bytes, "backup-test-passphrase")
+            .unwrap()
+            .needs_attention,
+        1
+    );
+    target_core
+        .restore_snapshot(
+            cloud_backup::decrypt(&bytes, "backup-test-passphrase").unwrap(),
+            ImportStrategy::Replace,
+        )
+        .await
+        .unwrap();
+    let store = target_core.store().unwrap();
+    let restored = store.resolve(&id).unwrap();
+    assert!(!restored.enabled);
+    assert_eq!(restored.passphrase.as_deref(), Some("synthetic-passphrase"));
+    assert!(restored.allowed_local_paths.is_none());
+    assert_eq!(store.settings().mcp_port, 19333);
+}
 #[test]
 fn saving_an_edited_profile_keeps_its_totp_secret_in_the_vault() {
     let dir = tempfile::tempdir().unwrap();

@@ -1,0 +1,14 @@
+.git
+.github
+.playwright-cli
+AGENTS.md
+docs/superpowers
+node_modules
+dist
+src-tauri/target
+src-tauri/resources
+.astralink-dev
+.env*
+*.log
+*.backup
+data

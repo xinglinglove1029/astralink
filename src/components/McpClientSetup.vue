@@ -1,28 +1,37 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { desktopBridge } from '../api'
+import { activeBridge, desktopBridge } from '../api'
+import { webMode } from '../webBridge'
 import { clientGuides, copyAccessToken, createClientSnippet, mcpEndpoint } from '../clientConfigs'
 import type { ClientId } from '../clientConfigs'
-import type { AstralinkController } from '../controller'
+import type { AstraLinkController } from '../controller'
 import Icon from './Icon.vue'
 
-const props = defineProps<{ dock: AstralinkController }>()
+const props = defineProps<{ dock: AstraLinkController }>()
 const { state } = props.dock
-const selected = ref<ClientId>('claude-code')
+const selected = ref<ClientId>(webMode ? 'codex' : 'claude-code')
 const guide = computed(() => clientGuides.find((item) => item.id === selected.value)!)
+const webConnection = ref<'same' | 'tunnel'>('same')
+const forwardPort = ref(18767)
+const sshUser = ref('')
+const sshHost = ref('')
+const localPort = computed(() => webMode && webConnection.value === 'tunnel' ? forwardPort.value : state.settings.mcpPort)
+const webHttpClient = computed(() => !['claude-desktop', 'workbuddy', 'cherry-studio', 'chatgpt'].includes(selected.value))
+const tunnelCommand = computed(() => `ssh -N -L 127.0.0.1:${forwardPort.value}:127.0.0.1:${state.settings.mcpPort} ${sshUser.value}@${sshHost.value}`)
+const tunnelValid = computed(() => Number.isInteger(forwardPort.value) && forwardPort.value >= 1024 && forwardPort.value <= 65535 && /^[a-zA-Z0-9._-]+$/.test(sshUser.value) && /^[a-zA-Z0-9._-]+$/.test(sshHost.value))
 const bridgePaths = ref<{ nodePath: string; scriptPath: string }>()
 watch(() => state.desktop && state.ready, async (ready) => {
-  if (!ready) { bridgePaths.value = undefined; return }
+  if (!ready || webMode) { bridgePaths.value = undefined; return }
   try { bridgePaths.value = await desktopBridge.invoke('get_mcp_bridge_paths', {}) }
   catch { bridgePaths.value = undefined }
 }, { immediate: true })
-const snippet = computed(() => createClientSnippet(selected.value, state.settings.mcpPort, bridgePaths.value))
-const endpoint = computed(() => mcpEndpoint(state.settings.mcpPort))
+const snippet = computed(() => webMode && (!webHttpClient.value || !Number.isInteger(localPort.value) || localPort.value < 1024 || localPort.value > 65535) ? null : createClientSnippet(selected.value, localPort.value, bridgePaths.value))
+const endpoint = computed(() => Number.isInteger(localPort.value) && localPort.value >= 1024 && localPort.value <= 65535 ? mcpEndpoint(localPort.value) : '请输入有效的客户端端口')
 const registration = computed(() => state.clientRegistrations[selected.value])
 const setupBusy = computed(() => !state.desktop || !state.ready || !state.engine.running || state.engineBusy || state.registrationBusy || !!state.mutation)
 const busy = ref(false)
 async function configure(pick = false) {
-  if (setupBusy.value) return
+  if (webMode || setupBusy.value) return
   const client = selected.value
   let filePath: string | undefined
   if (pick || client === 'windsurf') {
@@ -51,12 +60,17 @@ async function copyToken() {
   busy.value = true
   try {
     await copyAccessToken(
-      () => desktopBridge.invoke('get_mcp_token', {}),
+      () => activeBridge.invoke('get_mcp_token', {}),
       (value) => navigator.clipboard.writeText(value),
     )
     notify('访问令牌已复制，请粘贴到目标客户端')
-  } catch { notify('复制令牌失败，请检查桌面应用和剪贴板权限') }
+  } catch { notify('复制令牌失败，请检查服务状态和剪贴板权限') }
   finally { busy.value = false }
+}
+async function copyTunnel() {
+  if (!tunnelValid.value) return
+  try { await navigator.clipboard.writeText(tunnelCommand.value); notify('SSH 隧道命令已复制') }
+  catch { notify('复制失败，请手动选择命令') }
 }
 onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
 </script>
@@ -64,38 +78,46 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
 <template>
   <section class="client-setup" aria-labelledby="client-setup-title">
     <div class="client-setup-heading">
-      <div><h3 id="client-setup-title">MCP 客户端接入</h3><p>选择客户端，按对应格式接入星枢 Astralink。</p></div>
+      <div><h3 id="client-setup-title">MCP 客户端接入</h3><p>{{ webMode ? '选择客户端，配置同机访问或 SSH 隧道。' : '选择客户端，按对应格式接入AstraLink。' }}</p></div>
       <span :class="['connection-indicator', { live: state.engine.running }]">
         <span class="status-dot" />{{ state.engine.running ? '服务运行中' : '服务未启动' }}
       </span>
     </div>
-    <div class="endpoint-line"><span>本机 MCP 地址</span><code class="mono">{{ endpoint }}</code></div>
+    <div v-if="webMode" class="web-connection">
+      <div class="connection-modes" role="group" aria-label="客户端位置"><button type="button" :aria-pressed="webConnection === 'same'" :class="{ active: webConnection === 'same' }" @click="webConnection = 'same'">与服务同机</button><button type="button" :aria-pressed="webConnection === 'tunnel'" :class="{ active: webConnection === 'tunnel' }" @click="webConnection = 'tunnel'">远程 SSH 隧道</button></div>
+      <div v-if="webConnection === 'tunnel'" class="tunnel-fields"><label class="field"><span>SSH 用户名</span><input v-model.trim="sshUser" autocomplete="off" placeholder="ops" /></label><label class="field"><span>SSH 主机</span><input v-model.trim="sshHost" autocomplete="off" placeholder="server.example.com" /></label><label class="field"><span>客户端本地端口</span><input v-model.number="forwardPort" type="number" min="1024" max="65535" /></label></div>
+      <div v-if="webConnection === 'tunnel'" class="tunnel-command"><code class="mono">{{ tunnelValid ? tunnelCommand : '填写 SSH 账号、主机和客户端本地端口' }}</code><button type="button" class="icon-button" title="复制 SSH 隧道命令" aria-label="复制 SSH 隧道命令" :disabled="!tunnelValid" @click="copyTunnel"><Icon name="copy" :size="16" /></button></div>
+      <p class="client-caution">SSH 隧道需保持运行；MCP 不通过管理页的登录会话访问，也不会自动向公网开放。</p>
+    </div>
+    <div class="endpoint-line"><span>{{ webMode ? '客户端使用的 MCP 地址' : '本机 MCP 地址' }}</span><code class="mono">{{ endpoint }}</code></div>
     <div class="client-tabs" role="tablist" aria-label="AI 客户端">
       <button v-for="item in clientGuides" :id="'client-tab-' + item.id" :key="item.id" type="button" role="tab"
         :aria-selected="selected === item.id" :tabindex="selected === item.id ? 0 : -1"
         aria-controls="client-config-panel" :class="{ selected: selected === item.id }" @click="selected = item.id">
-        {{ item.name }}<span v-if="!item.supported" class="client-tab-limited" title="需要公网 HTTPS 网关">需远程网关</span>
+        {{ item.name }}<span v-if="webMode && ['claude-desktop', 'workbuddy', 'cherry-studio'].includes(item.id)" class="client-tab-limited">需本机桥接</span><span v-else-if="!item.supported" class="client-tab-limited" title="需要公网 HTTPS 网关">需远程网关</span>
       </button>
     </div>
     <div id="client-config-panel" class="client-panel" role="tabpanel" :aria-labelledby="'client-tab-' + selected">
       <div class="client-panel-heading"><div><strong>{{ guide.name }}</strong><span class="client-location mono">{{ guide.location }}</span></div>
         <button v-if="snippet" type="button" class="button secondary" aria-label="复制配置片段" title="复制配置片段" @click="copySnippet"><Icon name="copy" :size="15" />复制配置</button>
       </div>
-      <div v-if="guide.supported && guide.quickSetup !== false" class="client-quick-setup">
+      <div v-if="!webMode && guide.supported && guide.quickSetup !== false" class="client-quick-setup">
         <div class="client-quick-heading"><strong>快捷配置</strong><span>保留其他 MCP 条目，写入前自动备份。</span></div>
         <div class="button-row"><button type="button" class="button primary" :disabled="setupBusy" @click="configure()"><span v-if="state.registrationBusy" class="spinner" /><Icon v-else name="link" :size="15" />{{ selected === 'windsurf' ? '选择配置并接入' : '一键接入 ' + guide.name }}</button><button v-if="selected !== 'windsurf'" type="button" class="button secondary" :disabled="setupBusy" @click="configure(true)">选择其他配置文件</button></div>
         <p v-if="!state.engine.running">请先在服务器页面启动 MCP 服务。</p>
         <p>快捷配置写入用户级配置，自动填入访问令牌；也可选择你实际使用的配置文件。YAML 注释会移至备份；JSON 注释或 JSON5 配置请手动合并。</p>
         <div v-if="registration" class="registration-result" role="status"><strong><Icon name="check" :size="15" />{{ registration.reloadRequired ? '配置已更新' : '配置已是最新' }}</strong><p class="mono break-text">{{ registration.configPath }}</p><small v-if="registration.backupPath">备份：{{ registration.backupPath }}</small><p v-if="registration.reloadRequired">请重新加载 {{ guide.name }} 的 MCP 配置。</p></div>
       </div>
-      <ol class="client-steps"><li v-for="step in guide.steps" :key="step">{{ step }}</li></ol>
+      <ol v-if="!webMode" class="client-steps"><li v-for="step in guide.steps" :key="step">{{ step }}</li></ol>
+      <ol v-else-if="webHttpClient" class="client-steps"><li>{{ webConnection === 'same' ? '在运行 AstraLink 的服务器上启动 MCP 客户端。' : '先在运行 MCP 客户端的电脑上建立上方 SSH 隧道。' }}</li><li>将下方片段并入该客户端配置，再单独填写 MCP 访问令牌。</li></ol>
+      <p v-else class="client-caution">{{ selected === 'chatgpt' ? '云端客户端不能直接使用服务器回环地址；需要单独部署受保护的 HTTPS MCP 网关。' : '此客户端当前使用本机 stdio 桥接；请在安装了 AstraLink 桌面版的电脑上完成接入。服务器上的 Node 路径不能用于你的电脑。' }}</p>
       <div v-if="snippet" class="client-code-wrap"><pre class="client-code mono"><code>{{ snippet }}</code></pre></div>
-      <div v-else class="client-unavailable"><Icon name="info" :size="18" /><span>本机服务不能直接连接云端 ChatGPT。</span></div>
-      <p v-if="guide.caution" class="client-caution"><Icon name="alert" :size="15" />{{ guide.caution }}</p>
-      <div class="client-verify"><Icon name="check" :size="15" /><span>{{ guide.verify }}</span></div>
+      <div v-else-if="!webMode" class="client-unavailable"><Icon name="info" :size="18" /><span>本机服务不能直接连接云端 ChatGPT。</span></div>
+      <p v-if="!webMode && guide.caution" class="client-caution"><Icon name="alert" :size="15" />{{ guide.caution }}</p>
+      <div v-if="!webMode || webHttpClient" class="client-verify"><Icon name="check" :size="15" /><span>{{ guide.verify }}</span></div>
     </div>
-    <div v-if="guide.supported" class="client-token-row"><span><strong>访问令牌</strong><small>片段仅含占位符。令牌不在页面显示；复制后请不要粘贴到公开文件或聊天中。</small></span>
-      <button type="button" class="button secondary" :disabled="!state.desktop || !state.ready || busy" title="复制星枢 Astralink MCP 访问令牌" @click="copyToken"><Icon name="key" :size="15" />{{ busy ? '复制中…' : '复制令牌' }}</button>
+    <div v-if="guide.supported && (!webMode || webHttpClient)" class="client-token-row"><span><strong>访问令牌</strong><small>片段仅含占位符。令牌不在页面显示；复制后请不要粘贴到公开文件或聊天中。</small></span>
+      <button type="button" class="button secondary" :disabled="!state.desktop || !state.ready || busy" title="复制AstraLink MCP 访问令牌" @click="copyToken"><Icon name="key" :size="15" />{{ busy ? '复制中…' : '复制令牌' }}</button>
     </div>
     <p v-if="feedback" class="client-feedback" role="status" aria-live="polite">{{ feedback }}</p>
   </section>
@@ -103,6 +125,14 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
 
 <style scoped>
 .client-setup { grid-column: 1 / -1; min-width: 0; padding: 28px 0 8px; border-top: 1px solid #e1e7f0; }
+.web-connection { border-top: 1px solid var(--border, #dfe6ef); padding: 14px 0; }
+.connection-modes { display: inline-flex; border: 1px solid var(--border, #dfe6ef); border-radius: 6px; padding: 3px; gap: 2px; }
+.connection-modes button { padding: 7px 12px; border-radius: 4px; font-size: 11px; color: var(--text-muted, #66788b); }
+.connection-modes button.active { background: var(--surface-muted, #eef3f7); color: var(--text, #243b52); font-weight: 650; }
+.tunnel-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.tunnel-command { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 10px; border: 1px solid var(--border, #dfe6ef); border-radius: 6px; }
+.tunnel-command code { overflow-wrap: anywhere; font-size: 11px; }
+@media (max-width: 720px) { .tunnel-fields { grid-template-columns: 1fr; } }
 .client-setup-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
 .client-setup-heading h3 { color: #253650; font-size: 16px; font-weight: 650; }
 .client-setup-heading p { color: #718198; font-size: 12px; margin-top: 6px; }

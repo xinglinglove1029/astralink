@@ -18,7 +18,7 @@ export async function main(env = process.env) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(() => {
-    process.stderr.write('Astralink 引擎启动失败，请检查运行环境、端口和访问令牌。\n');
+    process.stderr.write('AstraLink 引擎启动失败，请检查运行环境、端口和访问令牌。\n');
     process.exitCode = 1;
   });
 }
