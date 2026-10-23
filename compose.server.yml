@@ -3,13 +3,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
-    image: astralink-server:local
+    image: ${ASTRALINK_IMAGE:-astralink-server:local}
     restart: unless-stopped
     environment:
       ASTRALINK_PUBLIC_ORIGIN: ${ASTRALINK_PUBLIC_ORIGIN:-http://127.0.0.1:1421}
       ASTRALINK_LOCAL_HTTP: ${ASTRALINK_LOCAL_HTTP:-1}
     ports:
-      - "127.0.0.1:1421:1421"
+      - "127.0.0.1:${ASTRALINK_WEB_PORT:-1421}:1421"
     volumes:
       - astralink-data:/var/lib/astralink
     healthcheck:
