@@ -2,7 +2,7 @@
 
 服务器版是单实例、单管理员、共享连接空间；桌面版仍独立运行。服务器和桌面端不共享 SQLite 文件，使用设置中的加密备份进行迁移。网页只提供管理能力；MCP 引擎仍绑定服务器内部的 `127.0.0.1`，网页登录会话不能用于访问 MCP。
 
-首次部署优先按 [README 的 Docker Compose 快速开始](../README.md#docker-compose-部署推荐)使用已发布的 `xinglinglove1029/astralink:v0.1.3`（linux/amd64）。本页补充源码构建、HTTPS 和运维细节。**没有默认管理员密码**，不要把密码写在仓库、`.env` 或 `docker run -e` 参数中。
+首次部署优先按 [README 的 Docker Compose 快速开始](../README.md#docker-compose-部署推荐)使用 `xinglinglove1029/astralink:v0.1.4`（linux/amd64）。本页补充源码构建、HTTPS 和运维细节。**没有默认管理员密码**，不要把密码写在仓库、`.env` 或 `docker run -e` 参数中。
 
 如果在同一台机器同时运行桌面版和服务器版，请在服务器版设置中选择不同的 MCP 端口，避免默认端口冲突。
 
@@ -24,13 +24,13 @@ ASTRALINK_DATA_DIR=/srv/astralink/data ASTRALINK_RESOURCE_DIR="$PWD" ASTRALINK_W
   src-tauri/target/release/astralink-server serve
 ```
 
-生产环境请用专用非 root 用户运行，并设置 `ASTRALINK_PUBLIC_ORIGIN=https://your-domain.example`。反向代理应提供 HTTPS，再转发至本机的 `127.0.0.1:1421`；不要将管理端口或 MCP 端口直接公开。公网入口必须与浏览器实际 Origin 完全一致。服务重启后网页登录会话失效。
+生产环境请用专用非 root 用户运行。可信内网可按下文开启直连 HTTP；不可信网络应设置 `ASTRALINK_PUBLIC_ORIGIN=https://your-domain.example`，由反向代理提供 HTTPS 并转发至本机的 `127.0.0.1:1421`。不要公开 MCP 端口。公网入口必须与浏览器实际 Origin 完全一致。服务重启后网页登录会话失效。
 
 ## Docker Compose
 
 推送 `v*` tag 后，GitHub Actions 在桌面构建通过时额外构建并推送 Docker Hub 镜像 `<DOCKERHUB_USERNAME>/astralink:v<版本>`（linux/amd64）。先在 Docker Hub 账号下创建 `astralink` 仓库，并在 GitHub 仓库 Secrets 中设置 `DOCKERHUB_USERNAME` 和具有写入权限的 Docker Hub access token `DOCKERHUB_TOKEN`；未配置时镜像步骤会跳过，桌面 Release 不受影响。手动补发旧 Release 不会自动补推镜像。
 
-镜像构建会显式执行前端构建、资源准备和 Rust 服务端构建。Compose 默认只把 HTTP 端口绑定在宿主机回环地址，用于本机验证；远程访问需通过宿主机 HTTPS 反向代理。仓库里的 Compose 文件同时支持 `ASTRALINK_IMAGE` 选择预构建镜像和 `build` 本地构建。**部署预构建镜像**应显式执行 `pull` 和 `up --no-build`，详见 README；以下是需要修改源码后从本地构建的方式：
+镜像构建会显式执行前端构建、资源准备和 Rust 服务端构建。Compose 默认将 HTTP 管理端口绑定到所有网卡；登录与同源校验仍生效，但 HTTP 会明文传输密码和会话。仓库里的 Compose 文件同时支持 `ASTRALINK_IMAGE` 选择预构建镜像和 `build` 本地构建。**部署旧版 `v0.1.3` 镜像**时，需显式设置 `ASTRALINK_WEB_BIND=127.0.0.1` 并使用回环 HTTP Origin；以下是从当前源码构建的方式：
 
 ```bash
 git clone https://github.com/xinglinglove1029/astralink.git
@@ -42,11 +42,13 @@ unset ADMIN_PASSWORD
 docker compose -f compose.server.yml up -d --no-build
 ```
 
-本机访问 `http://127.0.0.1:1421/`。如 `1421` 被占用，可设置 `ASTRALINK_WEB_PORT=14421`，同时将 `ASTRALINK_PUBLIC_ORIGIN` 设成 `http://127.0.0.1:14421`；这只是**管理页面的宿主机端口**，不是 MCP 服务端口。变更 Compose 项目名会创建不同的卷，新实例不会自动继承旧连接。
+源码构建的示例未设置公开地址时，本机访问 `http://127.0.0.1:1421/`；要从其他电脑访问，先设置 `ASTRALINK_PUBLIC_ORIGIN` 为实际使用的服务器地址。如 `1421` 被占用，可设置 `ASTRALINK_WEB_PORT=14421`，同时将 `ASTRALINK_PUBLIC_ORIGIN` 的端口改为 `14421`；这只是**管理页面的宿主机端口**，不是 MCP 服务端口。变更 Compose 项目名会创建不同的卷，新实例不会自动继承旧连接。
+
+`v0.1.4` Docker 镜像允许 HTTP 管理页，Compose 默认绑定所有网卡；其他电脑直接打开 `http://192.168.97.240:1421/` 时，设 `ASTRALINK_PUBLIC_ORIGIN=http://192.168.97.240:1421`，保证登录的 Origin 校验与实际地址一致。管理员登录仍必需，MCP 端口仍只监听容器回环地址。HTTP 会明文传输管理员密码与会话 Cookie，建议后续改用 HTTPS；旧版 `v0.1.3` 镜像不支持非回环 HTTP。
 
 ### HTTPS 反向代理
 
-在已有证书的 Linux 服务器上，可由同机 Nginx 终止 TLS，转发至宿主机回环端口。先在未提交的 `.env` 中设置 `ASTRALINK_PUBLIC_ORIGIN=https://astralink.example.com`，保留 Compose 默认的 `127.0.0.1:1421:1421` 映射；`ASTRALINK_LOCAL_HTTP` 可设为 `0`。然后配置 Nginx，例如：
+在已有证书的 Linux 服务器上，可由同机 Nginx 终止 TLS，转发至宿主机回环端口。先在未提交的 `.env` 中设置 `ASTRALINK_PUBLIC_ORIGIN=https://astralink.example.com`、`ASTRALINK_WEB_BIND=127.0.0.1`；`ASTRALINK_LOCAL_HTTP` 可设为 `0`。然后配置 Nginx，例如：
 
 ```nginx
 server {

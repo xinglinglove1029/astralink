@@ -671,12 +671,9 @@ pub async fn run(
         .map_err(|_| "无法读取监听地址")?
         .ip()
         .is_loopback();
-    let local_http = parsed.scheme() == "http"
-        && parsed
-            .host_str()
-            .is_some_and(|host| host == "127.0.0.1" || host == "localhost")
-        && (loopback || std::env::var("ASTRALINK_LOCAL_HTTP").as_deref() == Ok("1"));
-    if parsed.scheme() != "https" && !local_http {
+    let allow_local = loopback || std::env::var("ASTRALINK_LOCAL_HTTP").as_deref() == Ok("1");
+    let allow_http = std::env::var("ASTRALINK_ALLOW_HTTP").as_deref() == Ok("1");
+    if parsed.scheme() != "https" && !permitted_http_origin(&parsed, allow_local, allow_http) {
         return Err("远程访问必须使用 HTTPS 公开地址".into());
     }
     let home = directory.clone();
@@ -785,9 +782,33 @@ pub async fn run(
     result.map_err(|_| "Web 服务异常停止".into())
 }
 
+fn permitted_http_origin(origin: &reqwest::Url, allow_local: bool, allow_http: bool) -> bool {
+    if origin.scheme() != "http" {
+        return false;
+    }
+    match origin.host_str() {
+        Some("127.0.0.1" | "localhost") => allow_local || allow_http,
+        Some(_) => allow_http,
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_http_requires_explicit_opt_in() {
+        let permits = |url: &str, local, http| {
+            permitted_http_origin(&reqwest::Url::parse(url).unwrap(), local, http)
+        };
+        assert!(permits("http://127.0.0.1:1421", true, false));
+        assert!(!permits("http://192.168.97.240:1421", true, false));
+        assert!(permits("http://192.168.97.240:1421", false, true));
+        assert!(permits("http://example.com:1421", false, true));
+        assert!(permits("http://127.0.0.1:1421", false, true));
+        assert!(!permits("http://example.com:1421", false, false));
+    }
 
     #[test]
     fn initialized_server_encrypts_secrets_and_rejects_reinitialization() {
@@ -834,7 +855,7 @@ mod tests {
             core,
             directory: directory.path().to_path_buf(),
             assets: directory.path().to_path_buf(),
-            origin: "http://127.0.0.1:1421".into(),
+            origin: "http://192.168.97.240:1421".into(),
             secure: false,
             auth: Arc::new(Mutex::new(LoginState {
                 sessions: HashMap::new(),
@@ -853,7 +874,7 @@ mod tests {
         assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
         headers.insert(
             header::ORIGIN,
-            HeaderValue::from_static("http://127.0.0.1:1421"),
+            HeaderValue::from_static("http://192.168.97.240:1421"),
         );
         let response = login(
             State(state.clone()),

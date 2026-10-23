@@ -8,8 +8,9 @@ services:
     environment:
       ASTRALINK_PUBLIC_ORIGIN: ${ASTRALINK_PUBLIC_ORIGIN:-http://127.0.0.1:1421}
       ASTRALINK_LOCAL_HTTP: ${ASTRALINK_LOCAL_HTTP:-1}
+      ASTRALINK_ALLOW_HTTP: ${ASTRALINK_ALLOW_HTTP:-1}
     ports:
-      - "127.0.0.1:${ASTRALINK_WEB_PORT:-1421}:1421"
+      - "${ASTRALINK_WEB_BIND:-0.0.0.0}:${ASTRALINK_WEB_PORT:-1421}:1421"
     volumes:
       - astralink-data:/var/lib/astralink
     healthcheck:

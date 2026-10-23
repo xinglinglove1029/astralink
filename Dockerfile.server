@@ -1,6 +1,8 @@
 FROM node:24-bookworm AS node
 FROM rust:1-bookworm AS build
-RUN apt-get update && apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev pkg-config && rm -rf /var/lib/apt/lists/*
+ARG APT_MIRROR=
+RUN if [ -n "$APT_MIRROR" ]; then sed -i "s#http://deb.debian.org#${APT_MIRROR}#g" /etc/apt/sources.list.d/debian.sources; fi \
+    && apt-get update && apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev pkg-config && rm -rf /var/lib/apt/lists/*
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
@@ -9,17 +11,21 @@ COPY package.json package-lock.json ./
 COPY engine/package.json engine/package.json
 RUN npm ci --ignore-scripts --no-fund --no-audit
 COPY . .
-RUN npm run build && npm run resources && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --bin astralink-server
+ARG CARGO_MIRROR=
+RUN if [ -n "$CARGO_MIRROR" ]; then printf '[source.crates-io]\nreplace-with = "build-mirror"\n[source.build-mirror]\nregistry = "sparse+%s"\n' "$CARGO_MIRROR" > "$CARGO_HOME/config.toml"; fi \
+    && npm run build && npm run resources && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --bin astralink-server
 
 FROM node:24-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2 libgtk-3-0 ca-certificates && rm -rf /var/lib/apt/lists/*
+ARG APT_MIRROR=
+RUN if [ -n "$APT_MIRROR" ]; then sed -i "s#http://deb.debian.org#${APT_MIRROR}#g" /etc/apt/sources.list.d/debian.sources; fi \
+    && apt-get update && apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2 libgtk-3-0 ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/astralink
 COPY --from=build /src/src-tauri/target/release/astralink-server /usr/local/bin/astralink-server
 COPY --from=build /src/src-tauri/resources/engine ./engine
 COPY --from=build /src/dist ./dist
 RUN useradd -r -u 10001 -m astralink && mkdir -p /var/lib/astralink && chown astralink:astralink /var/lib/astralink
 USER astralink
-ENV ASTRALINK_DATA_DIR=/var/lib/astralink ASTRALINK_RESOURCE_DIR=/opt/astralink ASTRALINK_WEB_DIR=/opt/astralink/dist ASTRALINK_LISTEN=0.0.0.0:1421
+ENV ASTRALINK_DATA_DIR=/var/lib/astralink ASTRALINK_RESOURCE_DIR=/opt/astralink ASTRALINK_WEB_DIR=/opt/astralink/dist ASTRALINK_LISTEN=0.0.0.0:1421 ASTRALINK_ALLOW_HTTP=1
 EXPOSE 1421
 VOLUME ["/var/lib/astralink"]
 ENTRYPOINT ["astralink-server"]
