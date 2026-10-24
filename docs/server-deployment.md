@@ -2,7 +2,7 @@
 
 服务器版是单实例、单管理员、共享连接空间；桌面版仍独立运行。服务器和桌面端不共享 SQLite 文件，使用设置中的加密备份进行迁移。网页只提供管理能力；MCP 引擎仍绑定服务器内部的 `127.0.0.1`，网页登录会话不能用于访问 MCP。
 
-首次部署优先按 [README 的 Docker Compose 快速开始](../README.md#docker-compose-部署推荐)使用 `xinglinglove1029/astralink:v0.1.5`（linux/amd64）。旧版 `v0.1.4` 不支持当前简化配置，不能与当前 Compose 文件混用。本页补充源码构建、HTTPS 和运维细节。**没有默认管理员密码**，不要把真实密码提交到仓库。
+首次部署优先按 [README 的 Docker Compose 快速开始](../README.md#docker-compose-部署推荐)使用 `xinglinglove1029/astralink:v0.1.6`（linux/amd64）。旧版 `v0.1.4` 不支持当前简化配置，不能与当前 Compose 文件混用。本页补充源码构建、HTTPS 和运维细节。**没有默认管理员密码**，不要把真实密码提交到仓库。
 
 如果在同一台机器同时运行桌面版和服务器版，请在服务器版设置中选择不同的 MCP 端口，避免默认端口冲突。
 

@@ -14,7 +14,7 @@ AstraLink 集中管理 SSH 连接和内置 MCP 服务。可安装 Windows/macOS/
 git clone https://github.com/xinglinglove1029/astralink.git
 cd astralink
 
-export ASTRALINK_IMAGE=xinglinglove1029/astralink:v0.1.5
+export ASTRALINK_IMAGE=xinglinglove1029/astralink:v0.1.6
 # 在 compose.server.yml 的 ASTRALINK_ADMIN_PASSWORD 项填入至少 12 位的密码。
 # 不要把填了真实密码的 Compose 文件提交到仓库。
 docker compose -f compose.server.yml pull astralink
@@ -29,9 +29,9 @@ curl -fsS http://192.168.97.240:1421/api/auth/status
 
 `ASTRALINK_ADMIN_PASSWORD` 仅在全新数据卷首次启动时初始化密码；已有数据卷不会被重置。密码作为环境变量会出现在 Docker 容器元数据和 Compose 配置输出中，请仅在可信主机使用，且不要提交真实密码。旧版 `v0.1.4` 不支持此简化配置，不要与当前 Compose 文件混用。
 
-`v0.1.5` 可设置 `ASTRALINK_MCP_CLIENT_HOST=192.168.97.240`，让网页版“客户端使用的 MCP 地址”及复制的配置片段显示这个 IP；未设置仍为 `127.0.0.1`。这**只改变展示地址**，MCP 引擎仍监听容器回环地址。远程客户端需要另行配置受保护的转发入口，不能仅凭该变量直连 MCP。
+`v0.1.6` 可设置 `ASTRALINK_MCP_CLIENT_HOST=192.168.97.240`，让网页版“客户端使用的 MCP 地址”及复制的配置片段显示这个 IP；未设置仍为 `127.0.0.1`。这**只改变展示地址**，MCP 引擎仍监听容器回环地址。远程客户端需要另行配置受保护的转发入口，不能仅凭该变量直连 MCP。
 
-以上命令从仓库当前 `main` 获取 Compose 文件，并将实际运行的镜像固定为 `v0.1.5`。镜像尚未发布或需要修改源码时，可执行 `docker compose -f compose.server.yml build`，不设置 `ASTRALINK_IMAGE`，再执行 `up -d --no-build`。
+以上命令从仓库当前 `main` 获取 Compose 文件，并将实际运行的镜像固定为 `v0.1.6`。镜像尚未发布或需要修改源码时，可执行 `docker compose -f compose.server.yml build`，不设置 `ASTRALINK_IMAGE`，再执行 `up -d --no-build`。
 
 > **MCP 网络边界：** 管理页面的 HTTPS 地址不是 MCP 地址。MCP 引擎仅监听容器内部的 `127.0.0.1`，网页登录 Cookie 也不是 MCP 令牌；只映射容器端口不会将该回环服务安全地开放给远程客户端。服务器远程 MCP 接入需另外设计受保护的网关，不能把管理页地址填进 Codex。
 
@@ -40,7 +40,7 @@ curl -fsS http://192.168.97.240:1421/api/auth/status
 连接、管理员密码哈希、加密凭据和主密钥保存在 Compose 的 `astralink-data` 命名卷。升级镜像时继续使用同一 Compose 项目和卷，首次启动密码不会覆盖已设置的密码。新版本镜像发布后可这样升级：
 
 ```bash
-export ASTRALINK_IMAGE=xinglinglove1029/astralink:v0.1.5 # 改成要升级到的版本
+export ASTRALINK_IMAGE=xinglinglove1029/astralink:v0.1.6 # 改成要升级到的版本
 docker compose -f compose.server.yml pull astralink
 docker compose -f compose.server.yml up -d --no-build
 ```
@@ -53,13 +53,13 @@ docker compose -f compose.server.yml up -d --no-build
 
 ```bash
 docker volume create astralink-data
-docker pull xinglinglove1029/astralink:v0.1.5
+docker pull xinglinglove1029/astralink:v0.1.6
 read -rsp '设置管理员密码（至少 12 位）: ' ASTRALINK_ADMIN_PASSWORD; printf '\n'
 export ASTRALINK_ADMIN_PASSWORD
 docker run -d --name astralink --restart unless-stopped \
   -p 0.0.0.0:1421:1421 -v astralink-data:/var/lib/astralink \
   -e ASTRALINK_ADMIN_PASSWORD \
-  xinglinglove1029/astralink:v0.1.5
+  xinglinglove1029/astralink:v0.1.6
 unset ASTRALINK_ADMIN_PASSWORD
 docker logs --tail 50 astralink
 ```

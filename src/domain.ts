@@ -11,8 +11,15 @@ export function connectionResultLabel(status: ConnectionTest['status']): string 
 
 export const sourceLabels: Record<SourceKind, string> = { xshell: 'Xshell', tabby: 'Tabby', netcatty: 'Netcatty', 'mcp-json': 'MCP JSON', openssh: 'OpenSSH', finalshell: 'FinalShell', nyaterm: 'NyaTerm', mobaxterm: 'MobaXterm', securecrt: 'SecureCRT', electerm: 'Electerm', windterm: 'WindTerm', termius: 'Termius', 'nya-backup': 'NyaTerm 备份' }
 export const authLabels = { password: '密码', privateKey: '私钥', agent: 'SSH Agent' }
+function profileId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
 export function createProfile(): ConnectionProfile {
-  return { id: crypto.randomUUID(), name: '', host: '', port: 22, username: '', group: '', source: 'manual', authType: 'password', hasPassword: false, hasPassphrase: false, hasTotpSecret: false, transportMode: 'exec', tryKeyboard: false, enabled: true, notes: '' }
+  return { id: profileId(), name: '', host: '', port: 22, username: '', group: '', source: 'manual', authType: 'password', hasPassword: false, hasPassphrase: false, hasTotpSecret: false, transportMode: 'exec', tryKeyboard: false, enabled: true, notes: '' }
 }
 export function needsCredential(profile: ConnectionProfile) {
   return profile.authType === 'password' && !profile.hasPassword && !profile.password && !profile.tryKeyboard

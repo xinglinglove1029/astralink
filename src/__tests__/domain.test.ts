@@ -1,6 +1,20 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createProfile, validateProfile, inspectImport, validateSettings, connectionResultLabel } from '../domain'
 import type { ConnectionProfile } from '../types'
+
+describe('profile IDs', () => {
+  it('creates unique v4 UUIDs without crypto.randomUUID on HTTP', () => {
+    const cryptoWithRandomValues = globalThis.crypto
+    vi.stubGlobal('crypto', { getRandomValues: cryptoWithRandomValues.getRandomValues.bind(cryptoWithRandomValues) })
+    try {
+      const ids = Array.from({ length: 16 }, () => createProfile().id)
+      expect(new Set(ids).size).toBe(ids.length)
+      ids.forEach((id) => expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
 
 describe('connection test result labels', () => {
   it('does not label a finished authentication result as waiting', () => {
