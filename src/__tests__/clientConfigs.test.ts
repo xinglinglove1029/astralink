@@ -32,6 +32,14 @@ describe('MCP client connection guides', () => {
     expect(codex).not.toContain('18766')
   })
 
+  it('uses the configured server IP in HTTP client snippets while retaining the default', () => {
+    const host = '192.168.97.240'
+    expect(mcpEndpoint(18766, host)).toBe('http://192.168.97.240:18766/mcp')
+    expect(JSON.parse(createClientSnippet('claude-code', 18766, undefined, host)!).mcpServers.astralink.url).toBe('http://192.168.97.240:18766/mcp')
+    expect(createClientSnippet('codex', 18766, undefined, host)).toContain('http://192.168.97.240:18766/mcp')
+    expect(mcpEndpoint(18766, '::1')).toBe('http://[::1]:18766/mcp')
+  })
+
   it('uses each supported client config structure', () => {
     expect(JSON.parse(createClientSnippet('claude-code', 18766)!).mcpServers.astralink.type).toBe('http')
     expect(JSON.parse(createClientSnippet('cursor', 18766)!).mcpServers.astralink.url).toContain('/mcp')

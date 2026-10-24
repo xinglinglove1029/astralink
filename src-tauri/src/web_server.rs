@@ -30,6 +30,7 @@ use std::{
     collections::HashMap,
     fs,
     io::{self, Write},
+    net::IpAddr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -149,6 +150,19 @@ pub fn initialize(directory: &Path, password: &str) -> Result<(), String> {
     private_write(&directory.join("admin.hash"), hash.as_bytes(), true)
 }
 
+pub fn initialize_if_needed(directory: &Path, password: Option<&str>) -> Result<(), String> {
+    let has_hash = directory.join("admin.hash").exists();
+    let has_key = directory.join("master.key").exists();
+    if has_hash && has_key {
+        return Ok(());
+    }
+    if has_hash || has_key {
+        return Err("实例初始化不完整，拒绝覆盖已有数据".into());
+    }
+    let password = password.ok_or("管理员未初始化，请设置 ASTRALINK_ADMIN_PASSWORD")?;
+    initialize(directory, password)
+}
+
 #[derive(Clone)]
 struct Session {
     csrf: String,
@@ -164,8 +178,7 @@ pub struct WebState {
     core: Arc<AppCore>,
     directory: PathBuf,
     assets: PathBuf,
-    origin: String,
-    secure: bool,
+    mcp_client_host: String,
     auth: Arc<Mutex<LoginState>>,
     uploads: Arc<Mutex<HashMap<String, (String, PathBuf, Instant)>>>,
 }
@@ -203,9 +216,6 @@ impl WebState {
             .retain(|_, session| session.expires > Instant::now());
         auth.sessions.get(cookie(headers)?).cloned()
     }
-    fn origin_ok(&self, headers: &HeaderMap) -> bool {
-        headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) == Some(self.origin.as_str())
-    }
     fn authorized(&self, headers: &HeaderMap) -> Result<(), Response> {
         if self.session(headers).is_some() {
             Ok(())
@@ -217,7 +227,7 @@ impl WebState {
         let session = self
             .session(headers)
             .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "请先登录"))?;
-        if !self.origin_ok(headers)
+        if request_is_secure(headers).is_none()
             || headers
                 .get("x-astralink-csrf")
                 .and_then(|v| v.to_str().ok())
@@ -240,9 +250,9 @@ async fn login(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    if !state.origin_ok(&headers) {
+    let Some(is_secure) = request_is_secure(&headers) else {
         return error(StatusCode::FORBIDDEN, "请求校验失败");
-    }
+    };
     let Some(password) = body.get("password").and_then(Value::as_str) else {
         return error(StatusCode::BAD_REQUEST, "请输入密码");
     };
@@ -285,7 +295,7 @@ async fn login(
         },
     );
     let mut response = Json(json!({"authenticated": true, "csrf": csrf})).into_response();
-    let secure = if state.secure { "; Secure" } else { "" };
+    let secure = if is_secure { "; Secure" } else { "" };
     response.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_str(&format!(
@@ -385,7 +395,7 @@ async fn command(
         match name.as_str() {
             "get_app_state" => {
                 let (profiles, settings) = { let store = core.store()?; (store.profiles(), store.settings()) };
-                Ok(json!({"profiles": profiles, "settings": settings, "engine": core.engine.status().await}))
+                Ok(json!({"profiles": profiles, "settings": settings, "engine": core.engine.status().await, "mcpClientHost": state.mcp_client_host}))
             }
             "get_storage_info" => Ok(json!(core.store()?.storage_info())),
             "get_runtime_logs" => Ok(json!(core.logs.snapshot())),
@@ -651,31 +661,19 @@ pub async fn run(
     directory: PathBuf,
     web_assets: PathBuf,
     address: &str,
-    origin: String,
     paths: engine::RuntimePaths,
 ) -> Result<(), String> {
-    let parsed = reqwest::Url::parse(&origin).map_err(|_| "公开访问地址无效")?;
-    if parsed.path() != "/"
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-        || parsed.username() != ""
-        || parsed.password().is_some()
-    {
-        return Err("公开访问地址必须是根路径".into());
-    }
+    let client_host = std::env::var_os("ASTRALINK_MCP_CLIENT_HOST")
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| "客户端 MCP IP 无效".to_string())
+        })
+        .transpose()?;
+    let mcp_client_host = configured_mcp_client_host(client_host.as_deref())?;
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|_| "无法监听管理端口")?;
-    let loopback = listener
-        .local_addr()
-        .map_err(|_| "无法读取监听地址")?
-        .ip()
-        .is_loopback();
-    let allow_local = loopback || std::env::var("ASTRALINK_LOCAL_HTTP").as_deref() == Ok("1");
-    let allow_http = std::env::var("ASTRALINK_ALLOW_HTTP").as_deref() == Ok("1");
-    if parsed.scheme() != "https" && !permitted_http_origin(&parsed, allow_local, allow_http) {
-        return Err("远程访问必须使用 HTTPS 公开地址".into());
-    }
     let home = directory.clone();
     let core = Arc::new(AppCore::open(
         directory.clone(),
@@ -707,8 +705,7 @@ pub async fn run(
         core,
         directory,
         assets: source.clone(),
-        origin,
-        secure: parsed.scheme() == "https",
+        mcp_client_host,
         auth: Arc::new(Mutex::new(LoginState {
             sessions: HashMap::new(),
             failures: 0,
@@ -782,14 +779,35 @@ pub async fn run(
     result.map_err(|_| "Web 服务异常停止".into())
 }
 
-fn permitted_http_origin(origin: &reqwest::Url, allow_local: bool, allow_http: bool) -> bool {
-    if origin.scheme() != "http" {
-        return false;
+fn request_is_secure(headers: &HeaderMap) -> Option<bool> {
+    let origin_text = headers.get(header::ORIGIN)?.to_str().ok()?;
+    let origin = reqwest::Url::parse(origin_text).ok()?;
+    if !matches!(origin.scheme(), "http" | "https")
+        || origin_text != origin.origin().ascii_serialization()
+    {
+        return None;
     }
-    match origin.host_str() {
-        Some("127.0.0.1" | "localhost") => allow_local || allow_http,
-        Some(_) => allow_http,
-        None => false,
+    let host = headers.get(header::HOST)?.to_str().ok()?;
+    if !host
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || b".-:[]".contains(&byte))
+    {
+        return None;
+    }
+    let request_host = reqwest::Url::parse(&format!("{}://{host}", origin.scheme())).ok()?;
+    if request_host.origin() != origin.origin() {
+        return None;
+    }
+    Some(origin.scheme() == "https")
+}
+
+fn configured_mcp_client_host(host: Option<&str>) -> Result<String, String> {
+    let host = host
+        .filter(|value| !value.is_empty())
+        .unwrap_or("127.0.0.1");
+    match host.parse::<IpAddr>() {
+        Ok(address) if !address.is_unspecified() => Ok(address.to_string()),
+        _ => Err("客户端 MCP IP 无效".into()),
     }
 }
 
@@ -798,16 +816,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remote_http_requires_explicit_opt_in() {
-        let permits = |url: &str, local, http| {
-            permitted_http_origin(&reqwest::Url::parse(url).unwrap(), local, http)
+    fn origin_must_match_request_host_for_http_and_https() {
+        let matches = |origin: &str, host: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ORIGIN, HeaderValue::from_str(origin).unwrap());
+            headers.insert(header::HOST, HeaderValue::from_str(host).unwrap());
+            request_is_secure(&headers)
         };
-        assert!(permits("http://127.0.0.1:1421", true, false));
-        assert!(!permits("http://192.168.97.240:1421", true, false));
-        assert!(permits("http://192.168.97.240:1421", false, true));
-        assert!(permits("http://example.com:1421", false, true));
-        assert!(permits("http://127.0.0.1:1421", false, true));
-        assert!(!permits("http://example.com:1421", false, false));
+        assert_eq!(
+            matches("http://127.0.0.1:1421", "127.0.0.1:1421"),
+            Some(false)
+        );
+        assert_eq!(
+            matches("http://192.168.97.240:1421", "192.168.97.240:1421"),
+            Some(false)
+        );
+        assert_eq!(
+            matches("https://astralink.example.com", "astralink.example.com"),
+            Some(true)
+        );
+        assert_eq!(matches("http://evil.example", "192.168.97.240:1421"), None);
+        assert_eq!(
+            matches("http://192.168.97.240:1422", "192.168.97.240:1421"),
+            None
+        );
+        assert_eq!(matches("null", "192.168.97.240:1421"), None);
+        assert_eq!(
+            matches("http://192.168.97.240:1421/path", "192.168.97.240:1421"),
+            None
+        );
+        assert_eq!(matches("http://evil.example", "evil.example/path"), None);
+    }
+
+    #[test]
+    fn configured_client_ip_defaults_to_loopback_and_rejects_invalid_ips() {
+        assert_eq!(configured_mcp_client_host(None).unwrap(), "127.0.0.1");
+        assert_eq!(
+            configured_mcp_client_host(Some("192.168.97.240")).unwrap(),
+            "192.168.97.240"
+        );
+        assert_eq!(configured_mcp_client_host(Some("::1")).unwrap(), "::1");
+        for invalid in [
+            "0.0.0.0",
+            "not-an-ip",
+            "https://example.com",
+            "192.168.97.240/mcp",
+        ] {
+            assert!(configured_mcp_client_host(Some(invalid)).is_err());
+        }
     }
 
     #[test]
@@ -834,6 +890,44 @@ mod tests {
         assert_eq!(store.get("profile/test/password").unwrap(), None);
     }
 
+    #[test]
+    fn startup_password_initializes_once_without_resetting_existing_data() {
+        let directory = tempfile::tempdir().unwrap();
+        initialize_if_needed(directory.path(), Some("first-password-1234")).unwrap();
+        let hash = fs::read(directory.path().join("admin.hash")).unwrap();
+        let key = fs::read(directory.path().join("master.key")).unwrap();
+        initialize_if_needed(directory.path(), Some("different-password-1234")).unwrap();
+        initialize_if_needed(directory.path(), None).unwrap();
+        assert_eq!(fs::read(directory.path().join("admin.hash")).unwrap(), hash);
+        assert_eq!(fs::read(directory.path().join("master.key")).unwrap(), key);
+        assert!(
+            PasswordHash::new(std::str::from_utf8(&hash).unwrap()).is_ok_and(|hash| {
+                Argon2::default()
+                    .verify_password(b"first-password-1234", &hash)
+                    .is_ok()
+            })
+        );
+    }
+
+    #[test]
+    fn startup_password_rejects_missing_or_short_value() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path().join("data");
+        assert!(initialize_if_needed(&data, None).is_err());
+        assert!(initialize_if_needed(&data, Some("short")).is_err());
+        assert!(!data.join("master.key").exists());
+    }
+
+    #[test]
+    fn startup_rejects_incomplete_data_without_touching_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let key = directory.path().join("master.key");
+        fs::write(&key, b"existing-key").unwrap();
+        assert!(initialize_if_needed(directory.path(), Some("new-password-1234")).is_err());
+        assert_eq!(fs::read(&key).unwrap(), b"existing-key");
+        assert!(!directory.path().join("admin.hash").exists());
+    }
+
     #[tokio::test]
     async fn login_requires_origin_and_mutations_require_csrf_and_password_change_revokes_sessions()
     {
@@ -855,8 +949,7 @@ mod tests {
             core,
             directory: directory.path().to_path_buf(),
             assets: directory.path().to_path_buf(),
-            origin: "http://192.168.97.240:1421".into(),
-            secure: false,
+            mcp_client_host: "192.168.97.240".into(),
             auth: Arc::new(Mutex::new(LoginState {
                 sessions: HashMap::new(),
                 failures: 0,
@@ -876,6 +969,20 @@ mod tests {
             header::ORIGIN,
             HeaderValue::from_static("http://192.168.97.240:1421"),
         );
+        assert_eq!(
+            login(
+                State(state.clone()),
+                headers.clone(),
+                Json(json!({"password":"first-password-1234"})),
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        headers.insert(
+            header::HOST,
+            HeaderValue::from_static("192.168.97.240:1421"),
+        );
         let response = login(
             State(state.clone()),
             headers.clone(),
@@ -885,6 +992,27 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let cookie = response.headers()[header::SET_COOKIE].to_str().unwrap();
         assert!(cookie.contains("HttpOnly; SameSite=Strict"));
+        assert!(!cookie.contains("; Secure"));
+        let mut tls_headers = HeaderMap::new();
+        tls_headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://astralink.example.com"),
+        );
+        tls_headers.insert(
+            header::HOST,
+            HeaderValue::from_static("astralink.example.com"),
+        );
+        let tls_login = login(
+            State(state.clone()),
+            tls_headers,
+            Json(json!({"password":"first-password-1234"})),
+        )
+        .await;
+        assert_eq!(tls_login.status(), StatusCode::OK);
+        assert!(tls_login.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("; Secure"));
         headers.insert(
             header::COOKIE,
             HeaderValue::from_str(cookie.split(';').next().unwrap()).unwrap(),

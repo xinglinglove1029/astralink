@@ -24,6 +24,15 @@ function setup(overrides: Record<string, (args?: any) => any> = {}) {
 }
 
 describe('async desktop state', () => {
+  it('keeps the server-provided MCP client IP through initial load and refresh', async () => {
+    const { dock, app } = setup()
+    app.mcpClientHost = '192.168.97.240'
+    await dock.initialize()
+    expect(dock.state.mcpClientHost).toBe('192.168.97.240')
+    app.mcpClientHost = undefined
+    await dock.refreshAppState()
+    expect(dock.state.mcpClientHost).toBe('127.0.0.1')
+  })
   it('loads explicit SQLite storage locations without returning credentials', async () => {
     const info={backend:'sqlite',databasePath:'C:/fixture/astralink.db',legacyBackupPath:'C:/fixture/state.json',serverCount:21}
     const { dock,calls }=setup({get_storage_info:()=>info})

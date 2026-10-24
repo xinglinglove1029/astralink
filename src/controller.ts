@@ -9,6 +9,7 @@ export function createAstraLink(bridge: DesktopBridge) {
     profiles: [] as ConnectionProfile[], sources: [] as SourceCandidate[],
     settings: { mcpPort: 18766, startOnLaunch: false, minimizeToTray: true } as AppSettings,
     engine: { running: false, endpoint: '' } as EngineStatus,
+    mcpClientHost: '127.0.0.1',
     notice: null as null | { kind: 'success' | 'error' | 'info'; text: string },
     mutation: '', engineBusy: false, registrationBusy: false, discoveryBusy: false,
     previewBusy: false, preview: null as ImportPreview | null,
@@ -129,6 +130,7 @@ export function createAstraLink(bridge: DesktopBridge) {
       if (disposed) return
       replaceProfiles(app.profiles)
       state.settings = app.settings
+      state.mcpClientHost = app.mcpClientHost || '127.0.0.1'
       if (eventRevision === engineRevision) applyEngineStatus(app.engine)
       initialized = true
       state.ready = true
@@ -374,6 +376,7 @@ export function createAstraLink(bridge: DesktopBridge) {
     if (!disposed) {
       replaceProfiles(app.profiles)
       state.settings = app.settings
+      state.mcpClientHost = app.mcpClientHost || '127.0.0.1'
       applyEngineStatus(app.engine)
       await refreshStorageInfo()
     }

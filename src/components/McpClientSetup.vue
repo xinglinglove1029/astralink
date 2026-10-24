@@ -16,6 +16,7 @@ const forwardPort = ref(18767)
 const sshUser = ref('')
 const sshHost = ref('')
 const localPort = computed(() => webMode && webConnection.value === 'tunnel' ? forwardPort.value : state.settings.mcpPort)
+const clientHost = computed(() => webMode && webConnection.value === 'same' ? state.mcpClientHost || '127.0.0.1' : '127.0.0.1')
 const webHttpClient = computed(() => !['claude-desktop', 'workbuddy', 'cherry-studio', 'chatgpt'].includes(selected.value))
 const tunnelCommand = computed(() => `ssh -N -L 127.0.0.1:${forwardPort.value}:127.0.0.1:${state.settings.mcpPort} ${sshUser.value}@${sshHost.value}`)
 const tunnelValid = computed(() => Number.isInteger(forwardPort.value) && forwardPort.value >= 1024 && forwardPort.value <= 65535 && /^[a-zA-Z0-9._-]+$/.test(sshUser.value) && /^[a-zA-Z0-9._-]+$/.test(sshHost.value))
@@ -25,8 +26,8 @@ watch(() => state.desktop && state.ready, async (ready) => {
   try { bridgePaths.value = await desktopBridge.invoke('get_mcp_bridge_paths', {}) }
   catch { bridgePaths.value = undefined }
 }, { immediate: true })
-const snippet = computed(() => webMode && (!webHttpClient.value || !Number.isInteger(localPort.value) || localPort.value < 1024 || localPort.value > 65535) ? null : createClientSnippet(selected.value, localPort.value, bridgePaths.value))
-const endpoint = computed(() => Number.isInteger(localPort.value) && localPort.value >= 1024 && localPort.value <= 65535 ? mcpEndpoint(localPort.value) : '请输入有效的客户端端口')
+const snippet = computed(() => webMode && (!webHttpClient.value || !Number.isInteger(localPort.value) || localPort.value < 1024 || localPort.value > 65535) ? null : createClientSnippet(selected.value, localPort.value, bridgePaths.value, clientHost.value))
+const endpoint = computed(() => Number.isInteger(localPort.value) && localPort.value >= 1024 && localPort.value <= 65535 ? mcpEndpoint(localPort.value, clientHost.value) : '请输入有效的客户端端口')
 const registration = computed(() => state.clientRegistrations[selected.value])
 const setupBusy = computed(() => !state.desktop || !state.ready || !state.engine.running || state.engineBusy || state.registrationBusy || !!state.mutation)
 const busy = ref(false)
@@ -84,10 +85,10 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
       </span>
     </div>
     <div v-if="webMode" class="web-connection">
-      <div class="connection-modes" role="group" aria-label="客户端位置"><button type="button" :aria-pressed="webConnection === 'same'" :class="{ active: webConnection === 'same' }" @click="webConnection = 'same'">与服务同机</button><button type="button" :aria-pressed="webConnection === 'tunnel'" :class="{ active: webConnection === 'tunnel' }" @click="webConnection = 'tunnel'">远程 SSH 隧道</button></div>
+      <div class="connection-modes" role="group" aria-label="客户端位置"><button type="button" :aria-pressed="webConnection === 'same'" :class="{ active: webConnection === 'same' }" @click="webConnection = 'same'">{{ state.mcpClientHost === '127.0.0.1' ? '与服务同机' : '指定地址' }}</button><button type="button" :aria-pressed="webConnection === 'tunnel'" :class="{ active: webConnection === 'tunnel' }" @click="webConnection = 'tunnel'">远程 SSH 隧道</button></div>
       <div v-if="webConnection === 'tunnel'" class="tunnel-fields"><label class="field"><span>SSH 用户名</span><input v-model.trim="sshUser" autocomplete="off" placeholder="ops" /></label><label class="field"><span>SSH 主机</span><input v-model.trim="sshHost" autocomplete="off" placeholder="server.example.com" /></label><label class="field"><span>客户端本地端口</span><input v-model.number="forwardPort" type="number" min="1024" max="65535" /></label></div>
       <div v-if="webConnection === 'tunnel'" class="tunnel-command"><code class="mono">{{ tunnelValid ? tunnelCommand : '填写 SSH 账号、主机和客户端本地端口' }}</code><button type="button" class="icon-button" title="复制 SSH 隧道命令" aria-label="复制 SSH 隧道命令" :disabled="!tunnelValid" @click="copyTunnel"><Icon name="copy" :size="16" /></button></div>
-      <p class="client-caution">SSH 隧道需保持运行；MCP 不通过管理页的登录会话访问，也不会自动向公网开放。</p>
+      <p class="client-caution">SSH 隧道需保持运行；MCP 不通过管理页的登录会话访问，也不会自动向公网开放。指定客户端 IP 只改变配置片段，不会开放容器里的 MCP 端口。</p>
     </div>
     <div class="endpoint-line"><span>{{ webMode ? '客户端使用的 MCP 地址' : '本机 MCP 地址' }}</span><code class="mono">{{ endpoint }}</code></div>
     <div class="client-tabs" role="tablist" aria-label="AI 客户端">
@@ -109,7 +110,7 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
         <div v-if="registration" class="registration-result" role="status"><strong><Icon name="check" :size="15" />{{ registration.reloadRequired ? '配置已更新' : '配置已是最新' }}</strong><p class="mono break-text">{{ registration.configPath }}</p><small v-if="registration.backupPath">备份：{{ registration.backupPath }}</small><p v-if="registration.reloadRequired">请重新加载 {{ guide.name }} 的 MCP 配置。</p></div>
       </div>
       <ol v-if="!webMode" class="client-steps"><li v-for="step in guide.steps" :key="step">{{ step }}</li></ol>
-      <ol v-else-if="webHttpClient" class="client-steps"><li>{{ webConnection === 'same' ? '在运行 AstraLink 的服务器上启动 MCP 客户端。' : '先在运行 MCP 客户端的电脑上建立上方 SSH 隧道。' }}</li><li>将下方片段并入该客户端配置，再单独填写 MCP 访问令牌。</li></ol>
+      <ol v-else-if="webHttpClient" class="client-steps"><li>{{ webConnection === 'tunnel' ? '先在运行 MCP 客户端的电脑上建立上方 SSH 隧道。' : clientHost === '127.0.0.1' ? '在运行 AstraLink 的服务器上启动 MCP 客户端。' : '先确认指定 IP 上的受保护 MCP 转发入口可从客户端访问。' }}</li><li>将下方片段并入该客户端配置，再单独填写 MCP 访问令牌。</li></ol>
       <p v-else class="client-caution">{{ selected === 'chatgpt' ? '云端客户端不能直接使用服务器回环地址；需要单独部署受保护的 HTTPS MCP 网关。' : '此客户端当前使用本机 stdio 桥接；请在安装了 AstraLink 桌面版的电脑上完成接入。服务器上的 Node 路径不能用于你的电脑。' }}</p>
       <div v-if="snippet" class="client-code-wrap"><pre class="client-code mono"><code>{{ snippet }}</code></pre></div>
       <div v-else-if="!webMode" class="client-unavailable"><Icon name="info" :size="18" /><span>本机服务不能直接连接云端 ChatGPT。</span></div>

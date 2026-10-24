@@ -25,7 +25,7 @@ COPY --from=build /src/src-tauri/resources/engine ./engine
 COPY --from=build /src/dist ./dist
 RUN useradd -r -u 10001 -m astralink && mkdir -p /var/lib/astralink && chown astralink:astralink /var/lib/astralink
 USER astralink
-ENV ASTRALINK_DATA_DIR=/var/lib/astralink ASTRALINK_RESOURCE_DIR=/opt/astralink ASTRALINK_WEB_DIR=/opt/astralink/dist ASTRALINK_LISTEN=0.0.0.0:1421 ASTRALINK_ALLOW_HTTP=1
+ENV ASTRALINK_DATA_DIR=/var/lib/astralink ASTRALINK_RESOURCE_DIR=/opt/astralink ASTRALINK_WEB_DIR=/opt/astralink/dist ASTRALINK_LISTEN=0.0.0.0:1421
 EXPOSE 1421
 VOLUME ["/var/lib/astralink"]
 ENTRYPOINT ["astralink-server"]

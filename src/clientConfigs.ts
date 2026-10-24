@@ -47,13 +47,14 @@ const token = '<ASTRALINK_MCP_TOKEN>'
 const header = { Authorization: 'Bearer ' + token }
 const pretty = (data: unknown) => JSON.stringify(data, null, 2)
 
-export function mcpEndpoint(port: number): string {
+export function mcpEndpoint(port: number, host = '127.0.0.1'): string {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('MCP 端口无效')
-  return 'http://127.0.0.1:' + port + '/mcp'
+  const address = host.includes(':') ? `[${host}]` : host
+  return `http://${address}:${port}/mcp`
 }
 
-export function createClientSnippet(client: ClientId, port: number, bridgePaths?: { nodePath: string; scriptPath: string }): string | null {
-  const url = mcpEndpoint(port)
+export function createClientSnippet(client: ClientId, port: number, bridgePaths?: { nodePath: string; scriptPath: string }, host = '127.0.0.1'): string | null {
+  const url = mcpEndpoint(port, host)
   switch (client) {
     case 'claude-code': return pretty({ mcpServers: { astralink: { type: 'http', url, headers: header } } })
     case 'codex': return '[mcp_servers.astralink]\nenabled = true\nurl = "' + url + '"\n\n[mcp_servers.astralink.http_headers]\nAuthorization = "Bearer ' + token + '"'

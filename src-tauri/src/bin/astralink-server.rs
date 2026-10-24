@@ -26,6 +26,10 @@ async fn execute() -> Result<(), String> {
             Ok(())
         }
         Some("serve") | None => {
+            let password = std::env::var("ASTRALINK_ADMIN_PASSWORD")
+                .ok()
+                .filter(|value| !value.is_empty());
+            web_server::initialize_if_needed(&directory, password.as_deref())?;
             let root = std::env::var_os("ASTRALINK_RESOURCE_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("."));
@@ -41,9 +45,7 @@ async fn execute() -> Result<(), String> {
                 .unwrap_or_else(|| root.join("dist"));
             let address =
                 std::env::var("ASTRALINK_LISTEN").unwrap_or_else(|_| "127.0.0.1:1421".into());
-            let origin = std::env::var("ASTRALINK_PUBLIC_ORIGIN")
-                .unwrap_or_else(|_| "http://127.0.0.1:1421".into());
-            web_server::run(directory, assets, &address, origin, paths).await
+            web_server::run(directory, assets, &address, paths).await
         }
         _ => Err("用法: astralink-server [init-admin|serve]".into()),
     }

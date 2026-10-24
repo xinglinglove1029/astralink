@@ -8,40 +8,39 @@ AstraLink 集中管理 SSH 连接和内置 MCP 服务。可安装 Windows/macOS/
 
 ## Docker Compose 部署（推荐）
 
-以下命令在 Linux shell 中执行；Windows 可在 WSL 的 Docker 环境中执行。需安装 Docker Engine 和 Compose 插件。Compose 默认将管理端口绑定到所有 IPv4 网卡；把示例地址替换成服务器实际 IP，其他电脑即可访问登录页。
+以下命令在 Linux shell 中执行；Windows 可在 WSL 的 Docker 环境中执行。需安装 Docker Engine 和 Compose 插件。Compose 默认将管理端口绑定到所有 IPv4 网卡，其他电脑可直接打开服务器 IP 的登录页。
 
 ```bash
 git clone https://github.com/xinglinglove1029/astralink.git
 cd astralink
 
-export ASTRALINK_IMAGE=xinglinglove1029/astralink:v0.1.4
-export ASTRALINK_PUBLIC_ORIGIN=http://192.168.97.240:1421 # 换成你的服务器 IP
+export ASTRALINK_IMAGE=xinglinglove1029/astralink:v0.1.5
+# 在 compose.server.yml 的 ASTRALINK_ADMIN_PASSWORD 项填入至少 12 位的密码。
+# 不要把填了真实密码的 Compose 文件提交到仓库。
 docker compose -f compose.server.yml pull astralink
-
-# 只在第一次部署时执行；没有默认账号或密码，密码至少 12 个字符。
-read -rsp '设置管理员密码: ' ADMIN_PASSWORD; printf '\n'
-printf '%s\n' "$ADMIN_PASSWORD" | docker compose -f compose.server.yml run --rm -T --no-deps astralink init-admin
-unset ADMIN_PASSWORD
-
 docker compose -f compose.server.yml up -d --no-build
 docker compose -f compose.server.yml ps
 curl -fsS http://192.168.97.240:1421/api/auth/status
 ```
 
-浏览器打开 `http://192.168.97.240:1421/`（替换成你的服务器 IP），只输入初始化时设置的管理员密码，不需要用户名。`/api/auth/status` 返回 `{"authenticated":false}` 表示服务可访问但尚未登录，**不是部署失败**。如要使用 HTTPS 反向代理，需将 `ASTRALINK_PUBLIC_ORIGIN` 改为浏览器实际使用的 `https://域名`；示例见[服务器部署说明](docs/server-deployment.md)。
+浏览器打开 `http://192.168.97.240:1421/`（替换成你的服务器 IP），只输入配置的管理员密码，不需要用户名。`/api/auth/status` 返回 `{"authenticated":false}` 表示服务可访问但尚未登录，**不是部署失败**。HTTPS 反向代理示例见[服务器部署说明](docs/server-deployment.md)。
 
-镜像 `v0.1.4` 的管理端口默认可被所有网卡访问，**但仍需要管理员登录**，且登录的 Origin 必须与 `ASTRALINK_PUBLIC_ORIGIN` 一致。HTTP 会明文传输密码和会话；在不可信网络使用时应改用 HTTPS。旧版 `v0.1.3` 镜像不支持非回环 HTTP；详见[部署说明](docs/server-deployment.md)。
+管理端口默认可被所有网卡访问，**但仍需要管理员登录**。登录和修改配置仍校验浏览器的 Origin 与实际请求 Host 一致。HTTP 会明文传输密码和会话；在不可信网络使用时应改用 HTTPS。
 
-以上命令从仓库当前 `main` 获取 Compose 文件，并将实际运行的镜像固定为 `v0.1.4`。
+`ASTRALINK_ADMIN_PASSWORD` 仅在全新数据卷首次启动时初始化密码；已有数据卷不会被重置。密码作为环境变量会出现在 Docker 容器元数据和 Compose 配置输出中，请仅在可信主机使用，且不要提交真实密码。旧版 `v0.1.4` 不支持此简化配置，不要与当前 Compose 文件混用。
+
+`v0.1.5` 可设置 `ASTRALINK_MCP_CLIENT_HOST=192.168.97.240`，让网页版“客户端使用的 MCP 地址”及复制的配置片段显示这个 IP；未设置仍为 `127.0.0.1`。这**只改变展示地址**，MCP 引擎仍监听容器回环地址。远程客户端需要另行配置受保护的转发入口，不能仅凭该变量直连 MCP。
+
+以上命令从仓库当前 `main` 获取 Compose 文件，并将实际运行的镜像固定为 `v0.1.5`。镜像尚未发布或需要修改源码时，可执行 `docker compose -f compose.server.yml build`，不设置 `ASTRALINK_IMAGE`，再执行 `up -d --no-build`。
 
 > **MCP 网络边界：** 管理页面的 HTTPS 地址不是 MCP 地址。MCP 引擎仅监听容器内部的 `127.0.0.1`，网页登录 Cookie 也不是 MCP 令牌；只映射容器端口不会将该回环服务安全地开放给远程客户端。服务器远程 MCP 接入需另外设计受保护的网关，不能把管理页地址填进 Codex。
 
 ### 升级与数据
 
-连接、管理员密码哈希、加密凭据和主密钥保存在 Compose 的 `astralink-data` 命名卷。升级镜像时继续使用同一 Compose 项目和卷，**不要重跑 `init-admin`**：
+连接、管理员密码哈希、加密凭据和主密钥保存在 Compose 的 `astralink-data` 命名卷。升级镜像时继续使用同一 Compose 项目和卷，首次启动密码不会覆盖已设置的密码。新版本镜像发布后可这样升级：
 
 ```bash
-export ASTRALINK_IMAGE=xinglinglove1029/astralink:v0.1.4 # 改成要升级到的版本
+export ASTRALINK_IMAGE=xinglinglove1029/astralink:v0.1.5 # 改成要升级到的版本
 docker compose -f compose.server.yml pull astralink
 docker compose -f compose.server.yml up -d --no-build
 ```
@@ -54,16 +53,14 @@ docker compose -f compose.server.yml up -d --no-build
 
 ```bash
 docker volume create astralink-data
-docker pull xinglinglove1029/astralink:v0.1.4
-read -rsp '设置管理员密码: ' ADMIN_PASSWORD; printf '\n'
-printf '%s\n' "$ADMIN_PASSWORD" | docker run --rm -i \
-  -v astralink-data:/var/lib/astralink \
-  xinglinglove1029/astralink:v0.1.4 init-admin
-unset ADMIN_PASSWORD
+docker pull xinglinglove1029/astralink:v0.1.5
+read -rsp '设置管理员密码（至少 12 位）: ' ASTRALINK_ADMIN_PASSWORD; printf '\n'
+export ASTRALINK_ADMIN_PASSWORD
 docker run -d --name astralink --restart unless-stopped \
   -p 0.0.0.0:1421:1421 -v astralink-data:/var/lib/astralink \
-  -e ASTRALINK_PUBLIC_ORIGIN=http://192.168.97.240:1421 \
-  xinglinglove1029/astralink:v0.1.4
+  -e ASTRALINK_ADMIN_PASSWORD \
+  xinglinglove1029/astralink:v0.1.5
+unset ASTRALINK_ADMIN_PASSWORD
 docker logs --tail 50 astralink
 ```
 

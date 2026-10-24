@@ -30,7 +30,7 @@ export interface ConnectionProfile {
 }
 export interface AppSettings { mcpPort: number; startOnLaunch: boolean; minimizeToTray: boolean }
 export interface EngineStatus { running: boolean; endpoint: string; pid?: number; version?: string; error?: string }
-export interface AppState { profiles: ConnectionProfile[]; settings: AppSettings; engine: EngineStatus }
+export interface AppState { profiles: ConnectionProfile[]; settings: AppSettings; engine: EngineStatus; mcpClientHost?: string }
 export interface ImportIssue { severity: 'warning' | 'error'; message: string; profileName?: string }
 export interface ImportPreview {
   source: string

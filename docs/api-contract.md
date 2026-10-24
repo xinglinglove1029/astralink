@@ -16,7 +16,7 @@ interface ConnectionProfile {
 }
 interface AppSettings { mcpPort:number; startOnLaunch:boolean; minimizeToTray:boolean }
 interface EngineStatus { running:boolean; endpoint:string; pid?:number; version?:string; error?:string }
-interface AppState { profiles:ConnectionProfile[]; settings:AppSettings; engine:EngineStatus }
+interface AppState { profiles:ConnectionProfile[]; settings:AppSettings; engine:EngineStatus; mcpClientHost?:string }
 interface ImportIssue { severity:'warning'|'error'; message:string; profileName?:string }
 interface ImportPreview { source:string; sourcePath:string; profiles:ConnectionProfile[]; issues:ImportIssue[]; stats:{total:number;ready:number;needsCredential:number;unsupported:number} }
 interface SourceCandidate { kind:string; label:string; path:string; exists:boolean; profileCount?:number }
@@ -28,7 +28,9 @@ interface ConnectionTest { status:'connected'|'partial'|'auth_required'|'failed'
 
 桌面与服务器均支持 AstraLink 自身加密快照。`export_backup_file`、`preview_backup_file`、`restore_backup_file` 在桌面使用本地绝对路径；服务器版通过登录保护的下载/上传 API 传输文件，不接受浏览器提供的任意服务器路径。快照 v2 包含 profiles 和 settings；v1 仍可恢复连接。导入时缺失的私钥或本地传输目录会使对应连接停用。管理员登录信息、MCP 令牌和私钥文件不随备份迁移。
 
-服务器入口：`GET /api/auth/status` 查询当前会话；`POST /api/auth/login|logout|password` 管理单管理员会话。其余 `POST /api/commands/{name}` 复用配置、测试和引擎核心；写请求校验同源 Origin、HttpOnly 会话 Cookie 与 `X-AstraLink-CSRF`。`POST /api/upload/{kind}/{ext}` 上传浏览器所选的单个导入文件（十分钟预览期）或私钥，`POST /api/backup/export|preview|import` 处理加密备份。客户端注册与 MCP 访问令牌接口不暴露给浏览器。
+服务器入口：`GET /api/auth/status` 查询当前会话；`POST /api/auth/login|logout|password` 管理单管理员会话。其余 `POST /api/commands/{name}` 复用配置、测试和引擎核心；登录要求 Origin 与实际请求 Host 同源，写请求另外校验 HttpOnly 会话 Cookie 与 `X-AstraLink-CSRF`。HTTPS Origin 的登录 Cookie 带 Secure。`POST /api/upload/{kind}/{ext}` 上传浏览器所选的单个导入文件（十分钟预览期）或私钥，`POST /api/backup/export|preview|import` 处理加密备份。客户端注册与 MCP 访问令牌接口不暴露给浏览器。
+
+服务器 `get_app_state` 的 `mcpClientHost` 来自 `ASTRALINK_MCP_CLIENT_HOST`（合法 IP；未配置为 `127.0.0.1`），只用于网页客户端配置片段的地址展示；SSH 隧道模式继续使用本机回环地址。它不改变 MCP 引擎的回环监听或 Docker 端口映射。
 
 - get_app_state {} -> AppState
 - get_storage_info {} -> {backend:'sqlite',databasePath:string,legacyBackupPath:string|null,serverCount:number}; shows actual per-platform data location in Settings.
