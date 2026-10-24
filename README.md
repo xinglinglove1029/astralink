@@ -4,6 +4,21 @@ AstraLink 提供 SSH 连接管理和内置 MCP 服务，可安装桌面客户端
 
 ![AstraLink 浏览器连接总览](docs/images/web-overview.png)
 
+## 桌面客户端下载
+
+在 [GitHub Releases](https://github.com/xinglinglove1029/astralink/releases) 选择**已发布**的版本，按系统下载安装包：
+
+| 平台 | 安装包 |
+| --- | --- |
+| Windows x64 | `AstraLink_*_x64-setup.exe` |
+| macOS Apple Silicon | `AstraLink_*_aarch64.dmg` |
+| macOS Intel | `AstraLink_*_x64.dmg` |
+| Linux x64 | `AstraLink_*_amd64.deb` 或 `AstraLink_*_amd64.AppImage` |
+
+桌面版可在“设置 → MCP 接入”查看各客户端配置片段，并按需复制访问令牌。支持 Claude Code、Codex、Cursor、VS Code、旧版 Windsurf Cascade、Antigravity、OpenCode、OpenClaw、Hermes、Claude Desktop、WorkBuddy 和 Cherry Studio；不同客户端的接入方式以应用内指引为准。云端 ChatGPT 不能直接连接本机回环地址，需要另行配置受保护的网关或隧道。
+
+可导入 Xshell、Tabby、Netcatty、FinalShell、NyaTerm、MobaXterm、SecureCRT、Electerm、WindTerm、Termius、OpenSSH 及 MCP JSON 中的 SSH 连接；加密或无法读取的凭据需导入后重新填写。桌面端和服务器端配置彼此独立，可通过加密备份迁移。
+
 ## Docker Compose 部署
 
 在服务器上创建 `docker-compose.yml`，内容如下。首次部署前，将 `ASTRALINK_ADMIN_PASSWORD` 改成自己的密码（至少 12 个字符），不要提交含真实密码的文件。
