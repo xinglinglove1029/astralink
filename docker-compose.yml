@@ -1,0 +1,13 @@
+name: astralink
+services:
+  astralink:
+    image: xinglinglove1029/astralink:v0.1.7
+    restart: unless-stopped
+    ports:
+      - "1421:1421"
+    environment:
+      ASTRALINK_ADMIN_PASSWORD: ""
+    volumes:
+      - astralink-data:/var/lib/astralink
+volumes:
+  astralink-data:
