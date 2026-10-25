@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { activeBridge, desktopBridge } from '../api'
-import { webMode } from '../webBridge'
+import { webMode, currentWebUser } from '../webBridge'
 import { clientGuides, copyAccessToken, createClientSnippet, mcpEndpoint } from '../clientConfigs'
 import type { ClientId } from '../clientConfigs'
 import type { AstraLinkController } from '../controller'
@@ -58,6 +58,7 @@ async function copySnippet() {
 }
 async function copyToken() {
   if (!state.desktop || !state.ready || busy.value) return
+  if (webMode && !window.confirm('生成新的个人 MCP 令牌？之前的令牌将立即失效，请同步更新客户端配置。')) return
   busy.value = true
   try {
     await copyAccessToken(
@@ -118,7 +119,7 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
       <div v-if="!webMode || webHttpClient" class="client-verify"><Icon name="check" :size="15" /><span>{{ guide.verify }}</span></div>
     </div>
     <div v-if="guide.supported && (!webMode || webHttpClient)" class="client-token-row"><span><strong>访问令牌</strong><small>片段仅含占位符。令牌不在页面显示；复制后请不要粘贴到公开文件或聊天中。</small></span>
-      <button type="button" class="button secondary" :disabled="!state.desktop || !state.ready || busy" title="复制AstraLink MCP 访问令牌" @click="copyToken"><Icon name="key" :size="15" />{{ busy ? '复制中…' : '复制令牌' }}</button>
+      <button type="button" class="button secondary" :disabled="!state.desktop || !state.ready || busy || (webMode && currentWebUser?.role === 'viewer')" title="生成并复制个人 MCP 访问令牌" @click="copyToken"><Icon name="key" :size="15" />{{ busy ? '生成中…' : webMode ? '生成个人令牌' : '复制令牌' }}</button>
     </div>
     <p v-if="feedback" class="client-feedback" role="status" aria-live="polite">{{ feedback }}</p>
   </section>

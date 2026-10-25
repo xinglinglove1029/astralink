@@ -4,9 +4,10 @@ use crate::{
     credentials::SecretStore,
     engine,
     models::{AppSettings, ConnectionProfile, ImportStrategy},
+    web_access::{AuditQuery, WebAccess, WebUser},
 };
 use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{PasswordHasher, SaltString},
     Argon2,
 };
 use axum::{
@@ -167,6 +168,8 @@ pub fn initialize_if_needed(directory: &Path, password: Option<&str>) -> Result<
 struct Session {
     csrf: String,
     expires: Instant,
+    user_id: String,
+    revision: i64,
 }
 struct LoginState {
     sessions: HashMap<String, Session>,
@@ -176,6 +179,7 @@ struct LoginState {
 #[derive(Clone)]
 pub struct WebState {
     core: Arc<AppCore>,
+    access: Arc<WebAccess>,
     directory: PathBuf,
     assets: PathBuf,
     mcp_client_host: String,
@@ -184,6 +188,40 @@ pub struct WebState {
 }
 fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({"error": message}))).into_response()
+}
+fn audit_start(state: &WebState, user: &WebUser, action: &str) -> Result<(), Response> {
+    state
+        .access
+        .audit(user, action, "started", None)
+        .map_err(|_| {
+            error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "审计服务不可用，操作未执行",
+            )
+        })
+}
+fn audit_result(state: &WebState, user: &WebUser, action: &str, response: Response) -> Response {
+    let outcome = if response.status().is_success() {
+        "success"
+    } else {
+        "failure"
+    };
+    if state.access.audit(user, action, outcome, None).is_err() {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "操作结果已产生但审计写入失败，请核对状态",
+        );
+    }
+    response
+}
+fn admin_action(state: &WebState, headers: &HeaderMap, action: &str) -> Result<WebUser, Response> {
+    let user = state.mutation_allowed(headers)?;
+    if user.role.as_deref() != Some("admin") {
+        let _ = state.access.audit(&user, action, "denied", None);
+        return Err(error(StatusCode::FORBIDDEN, "当前角色无权执行此操作"));
+    }
+    audit_start(state, &user, action)?;
+    Ok(user)
 }
 async fn security_headers(request: Request, next: Next) -> Response {
     let api = request.uri().path().starts_with("/api/");
@@ -210,21 +248,22 @@ fn cookie(headers: &HeaderMap) -> Option<&str> {
         .find_map(|part| part.trim().strip_prefix("astralink_session="))
 }
 impl WebState {
-    fn session(&self, headers: &HeaderMap) -> Option<Session> {
+    fn session(&self, headers: &HeaderMap) -> Option<(Session, WebUser)> {
         let mut auth = self.auth.lock().ok()?;
         auth.sessions
             .retain(|_, session| session.expires > Instant::now());
-        auth.sessions.get(cookie(headers)?).cloned()
+        let session = auth.sessions.get(cookie(headers)?).cloned()?;
+        let user = self.access.user(&session.user_id).ok()??;
+        (user.enabled && user.role.is_some() && user.revision == session.revision)
+            .then_some((session, user))
     }
-    fn authorized(&self, headers: &HeaderMap) -> Result<(), Response> {
-        if self.session(headers).is_some() {
-            Ok(())
-        } else {
-            Err(error(StatusCode::UNAUTHORIZED, "请先登录"))
-        }
+    fn authorized(&self, headers: &HeaderMap) -> Result<WebUser, Response> {
+        self.session(headers)
+            .map(|(_, user)| user)
+            .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "请先登录"))
     }
-    fn mutation_allowed(&self, headers: &HeaderMap) -> Result<(), Response> {
-        let session = self
+    fn mutation_allowed(&self, headers: &HeaderMap) -> Result<WebUser, Response> {
+        let (session, user) = self
             .session(headers)
             .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "请先登录"))?;
         if request_is_secure(headers).is_none()
@@ -235,13 +274,13 @@ impl WebState {
         {
             return Err(error(StatusCode::FORBIDDEN, "请求校验失败"));
         }
-        Ok(())
+        Ok(user)
     }
 }
 
 async fn auth_status(State(state): State<WebState>, headers: HeaderMap) -> Json<Value> {
     Json(match state.session(&headers) {
-        Some(session) => json!({"authenticated": true, "csrf": session.csrf}),
+        Some((session, user)) => json!({"authenticated": true, "csrf": session.csrf, "user":user}),
         None => json!({"authenticated": false}),
     })
 }
@@ -256,6 +295,17 @@ async fn login(
     let Some(password) = body.get("password").and_then(Value::as_str) else {
         return error(StatusCode::BAD_REQUEST, "请输入密码");
     };
+    let username = body
+        .get("username")
+        .and_then(Value::as_str)
+        .unwrap_or("admin");
+    if username.len() > 32
+        || !username
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+    {
+        return error(StatusCode::BAD_REQUEST, "用户名无效");
+    }
     let mut auth = match state.auth.lock() {
         Ok(auth) => auth,
         Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "登录服务不可用"),
@@ -266,19 +316,30 @@ async fn login(
     {
         return error(StatusCode::TOO_MANY_REQUESTS, "登录过于频繁，请稍后重试");
     }
-    let hash = fs::read_to_string(state.directory.join("admin.hash")).unwrap_or_default();
-    let valid = PasswordHash::new(&hash).is_ok_and(|hash| {
-        Argon2::default()
-            .verify_password(password.as_bytes(), &hash)
-            .is_ok()
-    });
-    if !valid {
+    let user = match state
+        .access
+        .authenticate(username, password, &state.directory)
+    {
+        Ok(user) => user,
+        Err(_) => return error(StatusCode::SERVICE_UNAVAILABLE, "登录服务不可用"),
+    };
+    let Some(user) = user else {
+        if state
+            .access
+            .audit_actor("anonymous", username, "login", "failure", None)
+            .is_err()
+        {
+            return error(StatusCode::SERVICE_UNAVAILABLE, "登录服务不可用");
+        }
         auth.failures = auth.failures.saturating_add(1);
         if auth.failures >= 5 {
             auth.failures = 0;
             auth.blocked_until = Some(Instant::now() + Duration::from_secs(900));
         }
-        return error(StatusCode::UNAUTHORIZED, "密码不正确");
+        return error(StatusCode::UNAUTHORIZED, "用户名或密码不正确");
+    };
+    if state.access.audit(&user, "login", "success", None).is_err() {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "登录服务不可用");
     }
     auth.failures = 0;
     auth.blocked_until = None;
@@ -292,9 +353,12 @@ async fn login(
         Session {
             csrf: csrf.clone(),
             expires: Instant::now() + Duration::from_secs(12 * 3600),
+            user_id: user.id.clone(),
+            revision: user.revision,
         },
     );
-    let mut response = Json(json!({"authenticated": true, "csrf": csrf})).into_response();
+    let mut response =
+        Json(json!({"authenticated": true, "csrf": csrf, "user":user})).into_response();
     let secure = if is_secure { "; Secure" } else { "" };
     response.headers_mut().insert(
         header::SET_COOKIE,
@@ -306,7 +370,11 @@ async fn login(
     response
 }
 async fn logout(State(state): State<WebState>, headers: HeaderMap) -> Response {
-    if let Err(response) = state.mutation_allowed(&headers) {
+    let user = match state.mutation_allowed(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    if let Err(response) = audit_start(&state, &user, "logout") {
         return response;
     }
     if let Some(token) = cookie(&headers) {
@@ -321,16 +389,17 @@ async fn logout(State(state): State<WebState>, headers: HeaderMap) -> Response {
             "astralink_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
         ),
     );
-    response
+    audit_result(&state, &user, "logout", response)
 }
 async fn change_password(
     State(state): State<WebState>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Err(response) = state.mutation_allowed(&headers) {
-        return response;
-    }
+    let user = match state.mutation_allowed(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     let (Some(old), Some(new)) = (
         body.get("oldPassword").and_then(Value::as_str),
         body.get("newPassword").and_then(Value::as_str),
@@ -340,31 +409,55 @@ async fn change_password(
     if new.chars().count() < 12 {
         return error(StatusCode::BAD_REQUEST, "新密码至少 12 个字符");
     }
-    let hash = fs::read_to_string(state.directory.join("admin.hash")).unwrap_or_default();
-    if !PasswordHash::new(&hash).is_ok_and(|hash| {
-        Argon2::default()
-            .verify_password(old.as_bytes(), &hash)
-            .is_ok()
-    }) {
+    if !state
+        .access
+        .authenticate(&user.username, old, &state.directory)
+        .ok()
+        .flatten()
+        .is_some_and(|verified| verified.id == user.id)
+    {
+        let _ = state
+            .access
+            .audit(&user, "change_password", "failure", None);
         return error(StatusCode::UNAUTHORIZED, "原密码不正确");
     }
-    let salt = SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
-    let Ok(hash) = Argon2::default().hash_password(new.as_bytes(), &salt) else {
-        return error(StatusCode::INTERNAL_SERVER_ERROR, "无法更新密码");
+    if let Err(response) = audit_start(&state, &user, "change_password") {
+        return response;
+    }
+    let result = if user.id == "admin" {
+        let salt = SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
+        Argon2::default()
+            .hash_password(new.as_bytes(), &salt)
+            .map_err(|_| "无法更新密码".to_string())
+            .and_then(|hash| {
+                state.access.bump_revision(&user.id)?;
+                private_write(
+                    &state.directory.join("admin.hash"),
+                    hash.to_string().as_bytes(),
+                    false,
+                )
+            })
+    } else {
+        state.access.change_password(&user.id, new)
     };
-    if private_write(
-        &state.directory.join("admin.hash"),
-        hash.to_string().as_bytes(),
-        false,
-    )
-    .is_err()
-    {
-        return error(StatusCode::INTERNAL_SERVER_ERROR, "无法更新密码");
+    if result.is_err() {
+        return audit_result(
+            &state,
+            &user,
+            "change_password",
+            error(StatusCode::INTERNAL_SERVER_ERROR, "无法更新密码"),
+        );
     }
     if let Ok(mut auth) = state.auth.lock() {
-        auth.sessions.clear();
+        auth.sessions
+            .retain(|_, session| session.user_id != user.id);
     }
-    Json(json!({"ok": true})).into_response()
+    audit_result(
+        &state,
+        &user,
+        "change_password",
+        Json(json!({"ok": true})).into_response(),
+    )
 }
 
 async fn command(
@@ -381,14 +474,60 @@ async fn command(
             | "get_engine_status"
             | "discover_sources"
             | "get_auth_challenges"
+            | "list_web_users"
+            | "list_web_audit"
+            | "web_report"
     );
     let access = if read_only {
         state.authorized(&headers)
     } else {
         state.mutation_allowed(&headers)
     };
-    if let Err(response) = access {
-        return response;
+    let user = match access {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    let required_admin = matches!(
+        name.as_str(),
+        "reveal_profile_secret"
+            | "update_settings"
+            | "list_web_users"
+            | "save_web_user"
+            | "save_web_user_account"
+            | "assign_web_user_role"
+            | "issue_web_user_token"
+            | "delete_web_user"
+            | "list_web_audit"
+            | "web_report"
+            | "revoke_web_token"
+    );
+    let required_operator = (!read_only && !required_admin) || name == "get_auth_challenges";
+    let needs_mcp_token = name == "get_mcp_token";
+    let profile_id = args
+        .get("profileId")
+        .or_else(|| args.get("profile").and_then(|profile| profile.get("id")))
+        .and_then(Value::as_str)
+        .and_then(|id| uuid::Uuid::parse_str(id).ok())
+        .map(|id| id.to_string());
+    if (required_admin && user.role.as_deref() != Some("admin"))
+        || ((required_operator || needs_mcp_token)
+            && !matches!(user.role.as_deref(), Some("admin" | "operator")))
+    {
+        let _ = state
+            .access
+            .audit(&user, &name, "denied", profile_id.as_deref());
+        return error(StatusCode::FORBIDDEN, "当前角色无权执行此操作");
+    }
+    if !read_only
+        && state
+            .access
+            .audit(&user, &name, "started", profile_id.as_deref())
+            .is_err()
+    {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "审计服务不可用，操作未执行",
+        );
     }
     let core = &state.core;
     let result: Result<Value, String> = async {
@@ -397,13 +536,35 @@ async fn command(
                 let (profiles, settings) = { let store = core.store()?; (store.profiles(), store.settings()) };
                 Ok(json!({"profiles": profiles, "settings": settings, "engine": core.engine.status().await, "mcpClientHost": state.mcp_client_host}))
             }
+            "list_web_users" => Ok(json!(state.access.list()?)),
+            "list_web_audit" => state.access.audit_query(&serde_json::from_value::<AuditQuery>(args.clone()).map_err(|_| "审计筛选参数无效")?),
+            "web_report" => state.access.summary(),
+            "save_web_user" => Ok(json!(state.access.save(
+                args.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()), arg(&args,"username")?,
+                args.get("password").and_then(Value::as_str).filter(|value| !value.is_empty()),
+                arg(&args,"role")?, args.get("enabled").and_then(Value::as_bool).unwrap_or(true))?)),
+            "save_web_user_account" => Ok(json!(state.access.save_account(
+                arg(&args,"id")?, arg(&args,"username")?,
+                args.get("password").and_then(Value::as_str).filter(|value| !value.is_empty()),
+                args.get("enabled").and_then(Value::as_bool).ok_or("账号状态无效")?)?)),
+            "assign_web_user_role" => {
+                let role = match args.get("role") {
+                    Some(Value::Null) => None,
+                    Some(Value::String(role)) => Some(role.as_str()),
+                    _ => return Err("角色参数无效".into()),
+                };
+                Ok(json!(state.access.assign_role(arg(&args,"id")?, role)?))
+            },
+            "issue_web_user_token" => Ok(json!(state.access.issue_token(arg(&args,"id")?)?)),
+            "delete_web_user" => { state.access.delete(arg(&args,"id")?)?; Ok(json!({"ok":true})) },
+            "revoke_web_token" => { state.access.revoke_token(arg(&args,"id")?)?; Ok(json!({"ok":true})) },
             "get_storage_info" => Ok(json!(core.store()?.storage_info())),
             "get_runtime_logs" => Ok(json!(core.logs.snapshot())),
             "get_engine_status" => Ok(json!(core.engine.status().await)),
             "get_auth_challenges" => Ok(json!(core.engine.pending_challenges().await)),
             "discover_sources" => Ok(json!([])),
             "reveal_profile_secret" => Ok(json!(core.store()?.read_secret(arg(&args, "profileId")?, arg(&args, "field")?)?)),
-            "get_mcp_token" => { core.ensure_active()?; Ok(json!(core.store()?.mcp_token()?)) },
+            "get_mcp_token" => Ok(json!(state.access.issue_token(&user.id)?)),
             "preview_import" => {
                 let kind = arg(&args, "sourceKind")?;
                 let upload_id = arg(&args, "filePath")?;
@@ -471,6 +632,23 @@ async fn command(
             _ => Err("网页不支持此操作".into()),
         }
     }.await;
+    if !read_only {
+        if state
+            .access
+            .audit(
+                &user,
+                &name,
+                if result.is_ok() { "success" } else { "failure" },
+                profile_id.as_deref(),
+            )
+            .is_err()
+        {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "操作结果已产生但审计写入失败，请核对状态",
+            );
+        }
+    }
     match result {
         Ok(value) => Json(value).into_response(),
         Err(message) => error(StatusCode::BAD_REQUEST, &message),
@@ -489,9 +667,32 @@ async fn upload(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Response {
-    if let Err(response) = state.mutation_allowed(&headers) {
+    let user = match state.mutation_allowed(&headers) {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    let action = if kind == "key" {
+        "upload_key"
+    } else {
+        "upload_import"
+    };
+    if !matches!(user.role.as_deref(), Some("admin" | "operator")) {
+        let _ = state.access.audit(&user, action, "denied", None);
+        return error(StatusCode::FORBIDDEN, "当前角色无权执行此操作");
+    }
+    if let Err(response) = audit_start(&state, &user, action) {
         return response;
     }
+    let response = upload_inner(&state, kind, ext, headers, bytes).await;
+    audit_result(&state, &user, action, response)
+}
+async fn upload_inner(
+    state: &WebState,
+    kind: String,
+    ext: String,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Response {
     if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
         return error(StatusCode::BAD_REQUEST, "上传文件大小无效");
     }
@@ -564,13 +765,19 @@ async fn backup_export(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Err(response) = state.mutation_allowed(&headers) {
-        return response;
-    }
-    let Some(passphrase) = body.get("passphrase").and_then(Value::as_str) else {
-        return error(StatusCode::BAD_REQUEST, "请输入备份口令");
+    let user = match admin_action(&state, &headers, "backup_export") {
+        Ok(user) => user,
+        Err(response) => return response,
     };
-    match state
+    let Some(passphrase) = body.get("passphrase").and_then(Value::as_str) else {
+        return audit_result(
+            &state,
+            &user,
+            "backup_export",
+            error(StatusCode::BAD_REQUEST, "请输入备份口令"),
+        );
+    };
+    let response = match state
         .core
         .backup_snapshot()
         .and_then(|snapshot| cloud_backup::encrypt(&snapshot, passphrase))
@@ -588,7 +795,8 @@ async fn backup_export(
         )
             .into_response(),
         Err(message) => error(StatusCode::BAD_REQUEST, &message),
-    }
+    };
+    audit_result(&state, &user, "backup_export", response)
 }
 fn decode_backup(body: &Value) -> Result<(Vec<u8>, &str), String> {
     let encoded = arg(body, "data")?;
@@ -605,24 +813,27 @@ async fn backup_preview(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Err(response) = state.mutation_allowed(&headers) {
-        return response;
-    }
+    let user = match admin_action(&state, &headers, "backup_preview") {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     let result = decode_backup(&body)
         .and_then(|(bytes, passphrase)| commands::backup_preview(&bytes, passphrase));
-    match result {
+    let response = match result {
         Ok(preview) => Json(json!(preview)).into_response(),
         Err(message) => error(StatusCode::BAD_REQUEST, &message),
-    }
+    };
+    audit_result(&state, &user, "backup_preview", response)
 }
 async fn backup_import(
     State(state): State<WebState>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Err(response) = state.mutation_allowed(&headers) {
-        return response;
-    }
+    let user = match admin_action(&state, &headers, "backup_import") {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     let result: Result<Value, String> = async {
         let (bytes, passphrase) = decode_backup(&body)?;
         if cloud_backup::fingerprint(&bytes) != arg(&body, "expectedFingerprint")? {
@@ -639,10 +850,11 @@ async fn backup_import(
         ))
     }
     .await;
-    match result {
+    let response = match result {
         Ok(value) => Json(value).into_response(),
         Err(message) => error(StatusCode::BAD_REQUEST, &message),
-    }
+    };
+    audit_result(&state, &user, "backup_import", response)
 }
 
 async fn index(State(state): State<WebState>) -> Response {
@@ -671,6 +883,9 @@ pub async fn run(
         })
         .transpose()?;
     let mcp_client_host = configured_mcp_client_host(client_host.as_deref())?;
+    let access = Arc::new(WebAccess::open(&directory)?);
+    std::env::set_var("ASTRALINK_MCP_IDENTITIES_FILE", access.identity_file());
+    std::env::set_var("ASTRALINK_MCP_AUDIT_FILE", access.audit_file());
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|_| "无法监听管理端口")?;
@@ -703,6 +918,7 @@ pub async fn run(
     }
     let state = WebState {
         core,
+        access,
         directory,
         assets: source.clone(),
         mcp_client_host,
@@ -814,6 +1030,7 @@ fn configured_mcp_client_host(host: Option<&str>) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use argon2::password_hash::{PasswordHash, PasswordVerifier};
 
     #[test]
     fn origin_must_match_request_host_for_http_and_https() {
@@ -947,6 +1164,7 @@ mod tests {
         );
         let state = WebState {
             core,
+            access: Arc::new(WebAccess::open(directory.path()).unwrap()),
             directory: directory.path().to_path_buf(),
             assets: directory.path().to_path_buf(),
             mcp_client_host: "192.168.97.240".into(),
@@ -983,6 +1201,21 @@ mod tests {
             header::HOST,
             HeaderValue::from_static("192.168.97.240:1421"),
         );
+        let running = state.core.engine.status().await.running;
+        for action in ["start_engine", "stop_engine"] {
+            assert_eq!(
+                command(
+                    State(state.clone()),
+                    RoutePath(action.into()),
+                    headers.clone(),
+                    Json(json!({})),
+                )
+                .await
+                .status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        assert_eq!(state.core.engine.status().await.running, running);
         let response = login(
             State(state.clone()),
             headers.clone(),
@@ -1032,7 +1265,7 @@ mod tests {
             .status(),
             StatusCode::FORBIDDEN
         );
-        let csrf = state.session(&headers).unwrap().csrf;
+        let csrf = state.session(&headers).unwrap().0.csrf;
         headers.insert("x-astralink-csrf", HeaderValue::from_str(&csrf).unwrap());
         assert!(state.mutation_allowed(&headers).is_ok());
         assert_eq!(
@@ -1066,7 +1299,7 @@ mod tests {
         );
         assert_eq!(
             login(
-                State(state),
+                State(state.clone()),
                 headers,
                 Json(json!({"password":"second-password-1234"}))
             )
@@ -1074,5 +1307,366 @@ mod tests {
             .status(),
             StatusCode::OK
         );
+        let events = state.access.audit_list(50).unwrap();
+        assert!(events
+            .iter()
+            .any(|event| event["action"] == "login" && event["outcome"] == "failure"));
+        assert!(events
+            .iter()
+            .any(|event| event["action"] == "login" && event["outcome"] == "success"));
+        assert!(events
+            .iter()
+            .any(|event| event["action"] == "change_password" && event["outcome"] == "success"));
+    }
+
+    #[tokio::test]
+    async fn web_roles_reject_mutations_and_revoke_sessions() {
+        let directory = tempfile::tempdir().unwrap();
+        initialize(directory.path(), "first-password-1234").unwrap();
+        let access = Arc::new(WebAccess::open(directory.path()).unwrap());
+        let viewer = access
+            .save(None, "reader", Some("reader-password-1234"), "viewer", true)
+            .unwrap();
+        let operator = access
+            .save(
+                None,
+                "operator",
+                Some("operator-password-1234"),
+                "operator",
+                true,
+            )
+            .unwrap();
+        let core = Arc::new(
+            AppCore::open(
+                directory.path().to_path_buf(),
+                Box::new(FileSecretStore::open(directory.path()).unwrap()),
+                engine::candidate_paths(Some(directory.path()), directory.path(), None),
+                directory.path().to_path_buf(),
+                None,
+                None,
+                directory.path().join("config.toml"),
+            )
+            .unwrap(),
+        );
+        let state = WebState {
+            core,
+            access: access.clone(),
+            directory: directory.path().to_path_buf(),
+            assets: directory.path().to_path_buf(),
+            mcp_client_host: "127.0.0.1".into(),
+            auth: Arc::new(Mutex::new(LoginState {
+                sessions: HashMap::new(),
+                failures: 0,
+                blocked_until: None,
+            })),
+            uploads: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("http://127.0.0.1:1421"),
+        );
+        headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:1421"));
+        let viewer_login = login(
+            State(state.clone()),
+            headers.clone(),
+            Json(json!({"username":"reader","password":"reader-password-1234"})),
+        )
+        .await;
+        assert_eq!(viewer_login.status(), StatusCode::OK);
+        let viewer_cookie = viewer_login.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&viewer_cookie).unwrap(),
+        );
+        let csrf = state.session(&headers).unwrap().0.csrf;
+        headers.insert("x-astralink-csrf", HeaderValue::from_str(&csrf).unwrap());
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("get_app_state".into()),
+                headers.clone(),
+                Json(json!({}))
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("get_mcp_token".into()),
+                headers.clone(),
+                Json(json!({}))
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("delete_profiles".into()),
+                headers.clone(),
+                Json(json!({"profileIds":[]}))
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("list_web_users".into()),
+                headers.clone(),
+                Json(json!({}))
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            upload(
+                State(state.clone()),
+                RoutePath(("key".into(), "pem".into())),
+                headers.clone(),
+                Bytes::from_static(b"private-test")
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(!directory.path().join("keys").exists());
+        assert_eq!(
+            backup_preview(State(state.clone()), headers.clone(), Json(json!({})))
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let operator_login = login(
+            State(state.clone()),
+            headers.clone(),
+            Json(json!({"username":"operator","password":"operator-password-1234"})),
+        )
+        .await;
+        assert_eq!(operator_login.status(), StatusCode::OK);
+        let operator_cookie = operator_login.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&operator_cookie).unwrap(),
+        );
+        let csrf = state.session(&headers).unwrap().0.csrf;
+        headers.insert("x-astralink-csrf", HeaderValue::from_str(&csrf).unwrap());
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("update_settings".into()),
+                headers.clone(),
+                Json(json!({}))
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("save_web_user_account".into()),
+                headers.clone(),
+                Json(json!({"id":operator.id,"username":"operator","enabled":true}))
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("assign_web_user_role".into()),
+                headers.clone(),
+                Json(json!({"id":operator.id,"role":"admin"}))
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("issue_web_user_token".into()),
+                headers.clone(),
+                Json(json!({"id":viewer.id}))
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            backup_import(State(state.clone()), headers.clone(), Json(json!({})))
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("get_mcp_token".into()),
+                headers.clone(),
+                Json(json!({}))
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert!(access.user(&operator.id).unwrap().unwrap().has_token);
+        access
+            .save(Some(&operator.id), "operator", None, "viewer", true)
+            .unwrap();
+        assert!(state.session(&headers).is_none());
+        assert!(!fs::read_to_string(access.identity_file())
+            .unwrap()
+            .contains(&operator.id));
+        assert!(access.user(&viewer.id).unwrap().unwrap().enabled);
+        let audit = access.audit_list(50).unwrap();
+        assert!(audit.iter().any(|event| event["actor"] == "reader"
+            && event["action"] == "upload_key"
+            && event["outcome"] == "denied"));
+        assert!(audit.iter().any(|event| event["actor"] == "operator"
+            && event["action"] == "backup_import"
+            && event["outcome"] == "denied"));
+        assert!(audit.iter().all(|event| event["outcome"] != "started"));
+        let admin_login = login(
+            State(state.clone()),
+            headers.clone(),
+            Json(json!({"username":"admin","password":"first-password-1234"})),
+        )
+        .await;
+        assert_eq!(admin_login.status(), StatusCode::OK);
+        let admin_cookie = admin_login.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&admin_cookie).unwrap(),
+        );
+        let csrf = state.session(&headers).unwrap().0.csrf;
+        headers.insert("x-astralink-csrf", HeaderValue::from_str(&csrf).unwrap());
+        assert_eq!(
+            command(State(state.clone()), RoutePath("save_web_user".into()), headers.clone(),
+                Json(json!({"id":"","username":"created_from_form","password":"new-password-1234","role":"operator","enabled":true})))
+                .await.status(),
+            StatusCode::OK
+        );
+        let created = access
+            .authenticate("created_from_form", "new-password-1234", directory.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("issue_web_user_token".into()),
+                headers.clone(),
+                Json(json!({"id":viewer.id}))
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let first = command(
+            State(state.clone()),
+            RoutePath("issue_web_user_token".into()),
+            headers.clone(),
+            Json(json!({"id":created.id})),
+        )
+        .await;
+        assert_eq!(first.status(), StatusCode::OK);
+        let first_token: String =
+            serde_json::from_slice(&axum::body::to_bytes(first.into_body(), 4096).await.unwrap())
+                .unwrap();
+        let second = command(
+            State(state.clone()),
+            RoutePath("issue_web_user_token".into()),
+            headers.clone(),
+            Json(json!({"id":created.id})),
+        )
+        .await;
+        assert_eq!(second.status(), StatusCode::OK);
+        let second_token: String = serde_json::from_slice(
+            &axum::body::to_bytes(second.into_body(), 4096)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_ne!(first_token, second_token);
+        let identity = fs::read_to_string(access.identity_file()).unwrap();
+        assert!(!identity.contains(&first_token));
+        assert!(!identity.contains(&format!("{:x}", Sha256::digest(first_token.as_bytes()))));
+        assert!(identity.contains(&format!("{:x}", Sha256::digest(second_token.as_bytes()))));
+        assert!(!format!("{:?}", access.audit_list(50).unwrap()).contains(&second_token));
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("assign_web_user_role".into()),
+                headers.clone(),
+                Json(json!({"id":created.id,"role":null}))
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert!(access.user(&created.id).unwrap().unwrap().role.is_none());
+        assert!(!access.user(&created.id).unwrap().unwrap().has_token);
+        assert!(access
+            .authenticate("created_from_form", "new-password-1234", directory.path())
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("issue_web_user_token".into()),
+                headers.clone(),
+                Json(json!({"id":created.id}))
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            command(
+                State(state.clone()),
+                RoutePath("assign_web_user_role".into()),
+                headers.clone(),
+                Json(json!({"id":created.id,"role":"operator"}))
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            command(State(state.clone()), RoutePath("save_web_user_account".into()), headers,
+                Json(json!({"id":created.id,"username":"account_edited","role":"viewer","enabled":false})))
+                .await.status(),
+            StatusCode::OK
+        );
+        let edited = access.user(&created.id).unwrap().unwrap();
+        assert_eq!(edited.role.as_deref(), Some("operator"));
+        assert!(!edited.enabled);
+        assert!(!edited.has_token);
     }
 }

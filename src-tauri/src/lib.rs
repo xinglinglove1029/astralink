@@ -15,6 +15,7 @@ pub mod runtime_logs;
 pub mod sqlite_store;
 pub mod storage;
 pub mod tabby_credentials;
+pub mod web_access;
 pub mod web_server;
 
 use commands::AppCore;

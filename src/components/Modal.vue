@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, useId } from 'vue'
 import Icon from './Icon.vue'
-const props = defineProps<{ title: string; subtitle?: string; wide?: boolean; busy?: boolean }>()
+const props = defineProps<{ title: string; subtitle?: string; wide?: boolean; busy?: boolean; inactive?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const titleId = useId()
 const panel = ref<HTMLElement>()
@@ -29,7 +29,7 @@ onUnmounted(() => { document.removeEventListener('keydown', keydown); if (previo
 <template>
   <Teleport to="body">
     <div class="modal-backdrop" @mousedown.self="!busy && emit('close')">
-      <section ref="panel" data-modal role="dialog" aria-modal="true" :aria-labelledby="titleId" tabindex="-1" class="modal" :class="{ 'modal-wide': wide }">
+      <section ref="panel" data-modal role="dialog" :aria-modal="inactive ? undefined : 'true'" :aria-hidden="inactive ? 'true' : undefined" :inert="inactive" :aria-labelledby="titleId" tabindex="-1" class="modal" :class="{ 'modal-wide': wide }">
         <header class="modal-header"><div><h2 :id="titleId">{{ title }}</h2><p v-if="subtitle">{{ subtitle }}</p></div><button class="icon-button" aria-label="关闭弹窗" :disabled="busy" @click="emit('close')"><Icon name="close" /></button></header>
         <div class="modal-body"><slot /></div>
         <footer v-if="$slots.footer" class="modal-footer"><slot name="footer" /></footer>

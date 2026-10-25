@@ -1,5 +1,9 @@
 import type { DesktopBridge } from './api'
 import type { CommandMap, EventMap, SourceKind } from './types'
+import { ref } from 'vue'
+
+export interface WebUser { id: string; username: string; role: 'admin' | 'operator' | 'viewer' | null; enabled: boolean; revision: number; hasToken: boolean }
+export const currentWebUser = ref<WebUser | null>(null)
 
 let csrf = ''
 let backupFile: File | null = null
@@ -20,17 +24,23 @@ async function request(path: string, body?: unknown, raw = false): Promise<unkno
   return raw ? response.blob() : response.json()
 }
 export async function checkWebAuth(): Promise<boolean> {
-  const result = await request('/api/auth/status') as { authenticated: boolean; csrf?: string }
+  const result = await request('/api/auth/status') as { authenticated: boolean; csrf?: string; user?: WebUser }
   csrf = result.csrf ?? ''
+  currentWebUser.value = result.user ?? null
   return result.authenticated
 }
-export async function loginWeb(password: string): Promise<void> {
-  const result = await request('/api/auth/login', { password }) as { csrf: string }
+export async function loginWeb(username: string, password: string): Promise<void> {
+  const result = await request('/api/auth/login', { username, password }) as { csrf: string; user: WebUser }
   csrf = result.csrf
+  currentWebUser.value = result.user
 }
-export async function logoutWeb(): Promise<void> { await request('/api/auth/logout', {}); csrf = '' }
+export async function logoutWeb(): Promise<void> { await request('/api/auth/logout', {}); csrf = ''; currentWebUser.value = null }
 export async function changeWebPassword(oldPassword: string, newPassword: string): Promise<void> {
   await request('/api/auth/password', { oldPassword, newPassword }); csrf = ''
+}
+
+export function webManagement<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  return request(`/api/commands/${name}`, args) as Promise<T>
 }
 
 async function chooseFile(): Promise<File | null> {
@@ -89,6 +99,7 @@ export const webBridge: DesktopBridge = {
     let active = true
     const poll = async () => {
       if (!active) return
+      if (event === 'astralink-auth' && currentWebUser.value?.role === 'viewer') return
       try {
         const command = event === 'astralink-auth' ? 'get_auth_challenges' : 'get_engine_status'
         const result = await request(`/api/commands/${command}`, {})

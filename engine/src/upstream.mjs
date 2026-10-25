@@ -7,6 +7,8 @@ export { SSHConnectionManager };
 // These internal entrypoints are present in the pinned 1.10.0 resource tree.
 // Scope upstream's singleton per tool call, without changing its registrations.
 const context = new AsyncLocalStorage();
+const actorContext = new AsyncLocalStorage();
+export function withMcpActor(actor, callback) { return actorContext.run(actor, callback); }
 const managerFacade = new Proxy({}, { get(_target, key) {
     return (...args) => {
       const pool = context.getStore()?.pool;
@@ -33,7 +35,7 @@ SSHConnectionManager.getInstance = () => managerFacade;
 Logger.log = () => {
 };
 Logger.handleError = () => '操作失败';
-export function registerUpstreamTools(server, pool) {
+export function registerUpstreamTools(server, pool, audit = () => {}) {
   registerAllTools({ registerTool(name, config, handler) {
       server.registerTool(name, config, (...args) => {
         const scope = { pool, secrets: new Set(pool.secrets()), generations: new Set() };
@@ -43,19 +45,31 @@ export function registerUpstreamTools(server, pool) {
           return [...values, ...values.map(value => JSON.stringify(value).slice(1, -1))];
         };
         return context.run(scope, async () => {
+          const actor = actorContext.getStore();
+          const started = Date.now();
+          const connectionName = args[0]?.connectionName;
+          const profileId = typeof connectionName === 'string'
+            ? [...pool.profiles.values()].find(profile => profile.name === connectionName)?.id
+            : undefined;
+          const log = (outcome) => audit({ actorId: actor?.id ?? 'desktop', actor: actor?.username ?? 'desktop',
+            action: String(name).slice(0, 64), outcome, profileId, durationMs: Date.now() - started });
+          log('started');
           pool.diagnostics?.record('tool_started');
           try {
             const result = await handler(...args);
             if (result?.isError)
             {
               pool.diagnostics?.record('tool_failed');
+              log('failure');
               return { ...result, content: result.content.map(item => item.type === 'text' ? { ...item, text: redact(item.text, secrets()) } : item) };
             }
             pool.diagnostics?.record('tool_finished');
+            log('success');
             return result;
           }
           catch (error) {
             pool.diagnostics?.record('tool_failed');
+            log('failure');
             if (error instanceof Error) {
               error.message = redact(error.message, secrets());
               throw error;

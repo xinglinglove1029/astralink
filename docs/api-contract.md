@@ -28,7 +28,13 @@ interface ConnectionTest { status:'connected'|'partial'|'auth_required'|'failed'
 
 桌面与服务器均支持 AstraLink 自身加密快照。`export_backup_file`、`preview_backup_file`、`restore_backup_file` 在桌面使用本地绝对路径；服务器版通过登录保护的下载/上传 API 传输文件，不接受浏览器提供的任意服务器路径。快照 v2 包含 profiles 和 settings；v1 仍可恢复连接。导入时缺失的私钥或本地传输目录会使对应连接停用。管理员登录信息、MCP 令牌和私钥文件不随备份迁移。
 
-服务器入口：`GET /api/auth/status` 查询当前会话；`POST /api/auth/login|logout|password` 管理单管理员会话。其余 `POST /api/commands/{name}` 复用配置、测试和引擎核心；登录要求 Origin 与实际请求 Host 同源，写请求另外校验 HttpOnly 会话 Cookie 与 `X-AstraLink-CSRF`。HTTPS Origin 的登录 Cookie 带 Secure。`POST /api/upload/{kind}/{ext}` 上传浏览器所选的单个导入文件（十分钟预览期）或私钥，`POST /api/backup/export|preview|import` 处理加密备份。客户端注册与 MCP 访问令牌接口不暴露给浏览器。
+服务器入口：`GET /api/auth/status` 查询当前会话；`POST /api/auth/login` 接受 `username`（旧客户端省略时默认为 `admin`）和 `password`，`POST /api/auth/logout|password` 管理当前用户会话。初始 `admin` 沿用 `admin.hash`，新用户存于 `web-access.db`。`POST /api/commands/list_web_users|save_web_user|save_web_user_account|assign_web_user_role|delete_web_user|revoke_web_token|list_web_audit|web_report` 仅管理员可用；`save_web_user_account` 只更新账号资料并保留数据库角色，`assign_web_user_role {id,role}` 可传 `admin`、`operator`、`viewer` 或 `null`（未分配），调整后撤销旧会话及令牌。旧库的角色列在启动时事务性迁移为可空，新账号仍默认查看者；未分配角色的账号无法登录 Web、签发或使用 MCP，重新分配角色后可再次登录。初始管理员角色不可移除。连接配置共享：管理员可管理设置、用户、备份、统计及连接；操作员可管理连接、启动 MCP 和测试；查看者只读。其余 `POST /api/commands/{name}` 复用配置、测试和引擎核心，服务端校验角色。登录要求 Origin 与实际请求 Host 同源，写请求另外校验 HttpOnly 会话 Cookie 与 `X-AstraLink-CSRF`。HTTPS Origin 的登录 Cookie 带 Secure。`POST /api/upload/{kind}/{ext}` 仅管理员或操作员上传浏览器所选的导入文件（十分钟预览期）或私钥，`POST /api/backup/export|preview|import` 仅管理员处理加密备份。客户端注册接口不暴露给浏览器。
+
+服务器 MCP 仍只监听回环地址，验证个人令牌摘要文件并以用户 ID 绑定协议会话；身份文件缺失或损坏时拒绝访问，旧共享令牌不再有效。Web 与 MCP 审计记录用户、渠道、操作、结果、连接 ID 及 MCP 耗时，不保存请求参数和响应；网页审计保留 90 天，MCP 文件轮换保存最近约 16 MiB。统计接口汇总最近 7 天**仍保留**的完成事件（包括拒绝），不包含预写入的 started 记录。
+
+管理员可通过 `issue_web_user_token {id}` 为启用的管理员或操作员签发个人 MCP 令牌，返回令牌明文仅供当次复制；已有令牌立即失效，查看者或停用用户拒绝签发。`revoke_web_token {id}` 撤销令牌；这两项接口均记录操作名称和结果，不写令牌正文。
+
+`list_web_audit` 接受 `{page?:number,pageSize?:20|50|100,actor?:string,channel?:'web'|'mcp',action?:string,outcome?:'success'|'failure'|'denied',profileId?:string,from?:number,to?:number}`；时间为毫秒时间戳且上下界均包含，用户和操作为不区分大小写的包含匹配，其余条件精确匹配。先过滤网页 SQLite 和保留的 MCP 记录，再按时间降序合并分页；返回 `{items:AuditEntry[],total:number,page:number,pageSize:number}`，超出最后一页会回到最后一页。
 
 服务器 `get_app_state` 的 `mcpClientHost` 来自 `ASTRALINK_MCP_CLIENT_HOST`（合法 IP；未配置为 `127.0.0.1`），只用于网页客户端配置片段的地址展示；SSH 隧道模式继续使用本机回环地址。它不改变 MCP 引擎的回环监听或 Docker 端口映射。
 

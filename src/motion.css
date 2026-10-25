@@ -1,0 +1,30 @@
+:root{--motion-ease-out:cubic-bezier(.2,.8,.2,1)}
+.page-surface{min-width:0}
+.view-shift-enter-active{transition:opacity 260ms var(--motion-ease-out),transform 260ms var(--motion-ease-out)}
+.view-shift-leave-active{transition:opacity 130ms ease-in,transform 130ms ease-in}
+.view-shift-enter-from{opacity:0;transform:translate3d(0,9px,0)}
+.view-shift-leave-to{opacity:0;transform:translate3d(0,-4px,0)}
+
+.nav-item{position:relative;transition:background-color 180ms ease,color 180ms ease}
+.nav-item::before{content:"";position:absolute;left:0;top:11px;bottom:11px;width:2px;border-radius:2px;background:var(--accent);opacity:0;transform:scaleY(.45);transition:opacity 200ms ease,transform 220ms var(--motion-ease-out);pointer-events:none}
+.nav-item.active{box-shadow:none}
+.nav-item.active::before{opacity:1;transform:scaleY(1)}
+.group-item,.settings-tabs button,.theme-dot{transition:background-color 180ms ease,border-color 180ms ease,color 180ms ease}
+.source-card{transition:border-color 200ms ease,background-color 200ms ease,box-shadow 200ms ease,transform 200ms var(--motion-ease-out)}
+@media(hover:hover){
+  .source-card:hover:not(:disabled){transform:translateY(-2px);box-shadow:var(--shadow)}
+  .settings-tabs button:hover:not(.active){background:var(--surface-hover);color:var(--text)}
+  .stat-card:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--border));box-shadow:var(--shadow)}
+}
+.stat-card{transition:border-color 200ms ease,box-shadow 200ms ease}
+.table-scroll tbody tr,.access-table tbody tr,.role-table tbody tr,.audit-scroll tbody tr{transition:background-color 180ms ease}
+.badge{transition:background-color 180ms ease,border-color 180ms ease,color 180ms ease}
+.modal-backdrop{animation:modal-overlay-in 160ms ease-out both}
+.modal{animation:modal-panel-in 220ms var(--motion-ease-out) both}
+.notice,.role-notice,.access-notice{animation:notice-in 220ms var(--motion-ease-out) both}
+@keyframes modal-overlay-in{from{opacity:0}to{opacity:1}}
+@keyframes modal-panel-in{from{opacity:0;transform:translate3d(0,8px,0)}to{opacity:1;transform:none}}
+@keyframes notice-in{from{opacity:0;transform:translate3d(0,-5px,0)}to{opacity:1;transform:none}}
+
+:root[data-motion=off] .view-shift-enter-from,:root[data-motion=off] .view-shift-leave-to{opacity:1!important;transform:none!important}
+@media(prefers-reduced-motion:reduce){.view-shift-enter-from,.view-shift-leave-to{opacity:1!important;transform:none!important}}

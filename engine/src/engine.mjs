@@ -1,5 +1,6 @@
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -7,7 +8,8 @@ import { AuthQueue } from './auth.mjs';
 import { Diagnostics } from './diagnostics.mjs';
 import { ConnectionPool } from './pool.mjs';
 import { validateProfiles, UUID } from './profiles.mjs';
-import { registerUpstreamTools } from './upstream.mjs';
+import { registerUpstreamTools, withMcpActor } from './upstream.mjs';
+import { recordToolCall } from './audit.mjs';
 import { EngineError } from './errors.mjs';
 import { tokenMatches, validOrigin, loopbackAuthority } from './security.mjs';
 const MAX_BODY = 1024 * 1024;
@@ -39,7 +41,7 @@ async function readJson(request) {
     throw new EngineError('INVALID_JSON', 'JSON 无效');
   }
 }
-export async function createEngine({ port = 18766, controlToken, mcpToken, authOptions, poolOptions, maxSessions = 64, sessionTtlMs = 1800000 } = {}) {
+export async function createEngine({ port = 18766, controlToken, mcpToken, identitiesFile, auditFile, authOptions, poolOptions, maxSessions = 64, sessionTtlMs = 1800000 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new EngineError('INVALID_PORT', '端口无效');
   if (![controlToken, mcpToken].every(token => typeof token === 'string' && token.length > 0 && token.length <= 4096 && !/\s/.test(token)) || controlToken === mcpToken)
@@ -84,7 +86,18 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, authO
         json(response, 404, { error: '接口不存在' });
         return;
       }
-      if (!tokenMatches(request.headers.authorization, mcp ? mcpToken : controlToken)) {
+      let actor;
+      if (mcp && identitiesFile) {
+        try {
+          const bearer = request.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
+          const hash = bearer && createHash('sha256').update(bearer).digest();
+          const users = JSON.parse(readFileSync(identitiesFile, { encoding: 'utf8' }));
+          if (hash && Array.isArray(users) && users.length <= 64)
+            actor = users.find(user => typeof user?.hash === 'string' && /^[a-f0-9]{64}$/.test(user.hash)
+              && timingSafeEqual(hash, Buffer.from(user.hash, 'hex')) && ['admin', 'operator'].includes(user.role));
+        } catch { /* Missing or invalid identity data fails closed. */ }
+      }
+      if ((mcp && identitiesFile && !actor) || (!mcp || !identitiesFile) && !tokenMatches(request.headers.authorization, mcp ? mcpToken : controlToken)) {
         json(response, 401, { error: '访问令牌无效' });
         return;
       }
@@ -99,6 +112,10 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, authO
           json(response, 404, { error: '会话不存在' });
           return;
         }
+        if (entry && identitiesFile && entry.userId !== actor.id) {
+          json(response, 403, { error: '会话与用户不匹配' });
+          return;
+        }
         const body = request.method === 'POST' ? await readJson(request) : undefined;
         if (!entry) {
           if (request.method !== 'POST' || !isInitializeRequest(body)) {
@@ -111,10 +128,10 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, authO
           }
           pendingSessions++;
           const mcpServer = new McpServer({ name: 'astralink', version: '0.1.0' });
-          entry = { mcp: mcpServer, active: 0, touched: Date.now() };
+          entry = { mcp: mcpServer, active: 0, touched: Date.now(), userId: actor?.id };
           const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID, enableJsonResponse: true, onsessioninitialized: sessionId => sessions.set(sessionId, entry) });
           entry.transport = transport;
-          registerUpstreamTools(mcpServer, pool);
+          registerUpstreamTools(mcpServer, pool, (event) => recordToolCall(auditFile, event));
           try {
             await mcpServer.connect(transport);
           }
@@ -131,7 +148,7 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, authO
           };
           try {
             entry.active++;
-            await transport.handleRequest(request, response, body);
+            await withMcpActor(actor, () => transport.handleRequest(request, response, body));
           }
           finally {
             entry.active--;
@@ -147,7 +164,7 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, authO
             entry.active++;
           entry.touched = Date.now();
           try {
-            await entry.transport.handleRequest(request, response, body);
+            await withMcpActor(actor, () => entry.transport.handleRequest(request, response, body));
           }
           finally {
             if (counted)
