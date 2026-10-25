@@ -1,7 +1,7 @@
 name: astralink
 services:
   astralink:
-    image: xinglinglove1029/astralink:v0.1.8
+    image: xinglinglove1029/astralink:v0.1.9
     restart: unless-stopped
     ports:
       - "1421:1421"

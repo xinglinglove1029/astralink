@@ -27,7 +27,7 @@ AstraLink 提供 SSH 连接管理和内置 MCP 服务，可安装桌面客户端
 name: astralink
 services:
   astralink:
-    image: xinglinglove1029/astralink:v0.1.8
+    image: xinglinglove1029/astralink:v0.1.9
     restart: unless-stopped
     ports:
       - "1421:1421"
@@ -52,7 +52,7 @@ docker compose ps
 不使用 Compose 时，先拉取 Docker Hub 镜像，并创建持久卷：
 
 ```bash
-docker pull xinglinglove1029/astralink:v0.1.8
+docker pull xinglinglove1029/astralink:v0.1.9
 docker volume create astralink-data
 read -rsp '设置管理员密码（至少 12 个字符）: ' ASTRALINK_ADMIN_PASSWORD; printf '\n'
 export ASTRALINK_ADMIN_PASSWORD
@@ -60,7 +60,7 @@ docker run -d --name astralink --restart unless-stopped \
   -p 1421:1421 \
   -v astralink-data:/var/lib/astralink \
   -e ASTRALINK_ADMIN_PASSWORD \
-  xinglinglove1029/astralink:v0.1.8
+  xinglinglove1029/astralink:v0.1.9
 unset ASTRALINK_ADMIN_PASSWORD
 docker ps --filter name=astralink
 ```
@@ -71,4 +71,4 @@ docker ps --filter name=astralink
 
 管理员在左侧“调用审计”菜单查看网页与 MCP 调用记录；“统计大屏”展示最近 7 天按用户、操作、渠道、连接和时间的汇总。审计只保存元数据，不保存命令、参数或输出。网页审计保留 90 天，MCP 审计保留最近约 16 MiB；超过保留范围的数据不计入统计。服务器数据卷包含用户库与审计文件，需一并保护和备份。
 
-管理页通过 HTTP 访问时，密码和会话以明文传输；不可信网络请使用 HTTPS 反向代理。MCP 服务只监听容器内的 `127.0.0.1`，映射管理端口不会将 MCP 对外开放。更多运维说明见 [服务器部署说明](docs/server-deployment.md)。
+管理页通过 HTTP 访问时，密码和会话以明文传输；不可信网络请使用 HTTPS 反向代理。MCP 默认只监听容器内的 `127.0.0.1`，映射管理端口不会将 MCP 对外开放；WorkBuddy / Cherry Studio 的服务器接入及远程监听设置见部署说明。更多运维说明见 [服务器部署说明](docs/server-deployment.md)。

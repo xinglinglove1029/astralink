@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyText } from '../clipboard'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import type { AstraLinkController } from '../controller'
 import type { UpdateResult } from '../updateCheck'
@@ -40,7 +41,7 @@ async function updateAdminPassword() {
 }
 async function copyDatabasePath() {
   if (!state.storageInfo) return
-  try { await navigator.clipboard.writeText(state.storageInfo.databasePath); storageMessage.value='数据库路径已复制' }
+  try { await copyText(state.storageInfo.databasePath); storageMessage.value='数据库路径已复制' }
   catch { storageMessage.value='复制失败，请手动复制路径' }
 }
 onMounted(() => { if(state.desktop && state.ready) void props.dock.refreshStorageInfo() })

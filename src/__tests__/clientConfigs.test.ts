@@ -54,6 +54,20 @@ describe('MCP client connection guides', () => {
     expect(createClientSnippet('hermes', 18766)).toContain('mcp_servers:')
   })
 
+  it('provides server HTTP examples without desktop paths and bridges stdio-only clients', () => {
+    for (const id of ['workbuddy', 'cherry-studio'] as const) {
+      const config = JSON.parse(createClientSnippet(id, 18766, undefined, '172.17.112.203', 'server')!).mcpServers.astralink
+      expect(config.url).toBe('http://172.17.112.203:18766/mcp')
+      expect(config.headers.Authorization).toBe('Bearer <ASTRALINK_MCP_TOKEN>')
+      expect(config.command).toBeUndefined()
+    }
+    const bridge = JSON.parse(createClientSnippet('claude-desktop', 18767, undefined, '127.0.0.1', 'server')!).mcpServers.astralink
+    expect(bridge.command).toBe('npx')
+    expect(bridge.args).toContain('mcp-remote')
+    expect(bridge.args).toContain('http://127.0.0.1:18767/mcp')
+    expect(bridge.env.AUTH_HEADER).toBe('Bearer <ASTRALINK_MCP_TOKEN>')
+  })
+
   it('refuses invalid ports', () => {
     expect(() => mcpEndpoint(0)).toThrow()
     expect(() => mcpEndpoint(65536)).toThrow()

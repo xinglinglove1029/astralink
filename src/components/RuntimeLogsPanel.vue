@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyText } from '../clipboard'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { AstraLinkController } from '../controller'
 import { filterRuntimeLogs, formatRuntimeLogs } from '../runtimeLogs'
@@ -15,7 +16,7 @@ const available = computed(() => state.desktop && state.ready)
 let timer: ReturnType<typeof setInterval> | undefined
 function profileName(id?: string) { return id ? state.profiles.find(profile => profile.id === id)?.name ?? id.slice(0, 8) : '应用' }
 async function copy() {
-  try { await navigator.clipboard.writeText(formatRuntimeLogs(logs.value.slice().reverse())); copyState.value = '已复制筛选结果' }
+  try { await copyText(formatRuntimeLogs(logs.value.slice().reverse())); copyState.value = '已复制筛选结果' }
   catch { copyState.value = '复制失败，请使用导出' }
 }
 watch([level, profileId, query], () => { copyState.value = '' })

@@ -27,7 +27,7 @@ ASTRALINK_DATA_DIR=/srv/astralink/data ASTRALINK_RESOURCE_DIR="$PWD" ASTRALINK_W
 
 ## Docker Compose
 
-仓库根目录的 `docker-compose.yml` 直接使用 Docker Hub 镜像，部署命令见 README。可选环境变量 `ASTRALINK_MCP_CLIENT_HOST=192.168.97.240` 只改变网页版客户端配置片段的展示地址；MCP 服务仍监听容器回环地址，远程访问需要单独设置受保护的转发入口。
+仓库根目录的 `docker-compose.yml` 直接使用 Docker Hub 镜像，部署命令见 README。可选环境变量 `ASTRALINK_MCP_CLIENT_HOST=192.168.97.240` 只改变网页版客户端配置片段的展示地址。MCP 默认监听容器回环地址；下方“WorkBuddy / Cherry Studio”一节给出可信内网远程监听和端口映射方式。
 
 首次启动时密码至少 12 字符。已有完整数据卷时忽略启动密码，不会在容器重启或升级时重设；若仅存在管理员哈希或主密钥中的一个，服务会拒绝启动以保护已有数据。没有密码且未初始化时会明确报错。
 
@@ -70,3 +70,40 @@ server {
 桌面版和网页版在“设置 > 数据与备份 > 配置迁移”导出、预览并导入同一加密 `.backup` 文件；可选择合并或替换连接。新版备份包含连接凭据、TOTP 和应用设置，旧版 WebDAV `astralink-backup-v1` 仍可读取。管理员密码、MCP 令牌、运行日志、客户端注册信息和私钥文件不打包。导入后若目标机器缺少原私钥或本地传输目录，预览会提示数量，相关连接会被停用，需重新选择文件或目录后启用。服务器本地私钥可在连接编辑器中上传；第三方客户端文件在浏览器导入时上传临时副本，目录型来源需先导出单文件。
 
 首次部署后检查：未登录的配置 API 返回 401；错误密码被限速；登录后可新增连接、导出备份、删除并恢复连接；重启服务后配置仍在，旧会话失效。实际 SSH/OTP 还需用目标服务器验证。
+
+
+## WorkBuddy / Cherry Studio 从客户端电脑连接服务器
+
+支持 HTTP 的客户端不需要安装 AstraLink 桌面版。WorkBuddy 使用 `type: "http"`、`url` 和 `headers`；Cherry Studio 在 MCP 设置中选 Streamable HTTP、填写 URL 和 Authorization 请求头。Claude Desktop 的本地配置可使用 `npx mcp-remote` 桥接（客户端电脑需 Node.js），不必安装 AstraLink 桌面版。
+
+远程监听开关从 v0.1.9 开始提供；v0.1.8 镜像没有该开关。可信内网直连时，在原 `docker-compose.yml` 中补充以下项目（保留原镜像、密码与数据卷）：
+
+```yaml
+services:
+  astralink:
+    ports:
+      - "1421:1421"
+      - "18766:18766"
+    environment:
+      ASTRALINK_MCP_REMOTE_HOST: "172.17.112.203"
+```
+
+把 IP 改成实际服务器 IP，MCP 设置的端口与映射端口均保持为 18766；执行 `docker compose up -d`。开关未配置时仍只监听回环；配置后引擎监听容器网络，并只对远程开放 `/mcp`。远程请求必须使用个人令牌，控制接口仍只接受本机请求。`ASTRALINK_MCP_CLIENT_HOST` 只影响展示，不能替代监听开关或 Docker 端口映射；未指定展示 IP 时会使用远程监听 IP。
+
+WorkBuddy 示例（填入新签发的个人令牌）：
+
+```json
+{
+  "mcpServers": {
+    "astralink-xkkj": {
+      "type": "http",
+      "url": "http://172.17.112.203:18766/mcp",
+      "headers": { "Authorization": "Bearer <ASTRALINK_MCP_TOKEN>" }
+    }
+  }
+}
+```
+
+`ECONNREFUSED` 表示网络端口未监听或未映射，发生在令牌校验之前；401 表示网络已通但令牌无效。先用 `docker compose ps` 检查 18766 端口映射，再使用不带令牌的 `curl -i http://服务器IP:18766/mcp` 检查，返回 401 是预期结果。不要在排障输出中打印真实令牌。
+
+HTTP 适用于可信内网，跨不可信网络使用 HTTPS 网关或 SSH 隧道。Docker 下用 SSH 隧道时，也要启用远程监听，并将 MCP 映射改为 `127.0.0.1:18766:18766`，客户端电脑执行 `ssh -N -L 127.0.0.1:18767:127.0.0.1:18766 SSH用户@服务器IP`，客户端 URL 改为 `http://127.0.0.1:18767/mcp`。无需在服务器安装 WorkBuddy。

@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { isIP } from 'node:net';
 import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -41,13 +42,16 @@ async function readJson(request) {
     throw new EngineError('INVALID_JSON', 'JSON 无效');
   }
 }
-export async function createEngine({ port = 18766, controlToken, mcpToken, identitiesFile, auditFile, authOptions, poolOptions, maxSessions = 64, sessionTtlMs = 1800000 } = {}) {
+export async function createEngine({ port = 18766, controlToken, mcpToken, identitiesFile, auditFile, remoteHost, authOptions, poolOptions, maxSessions = 64, sessionTtlMs = 1800000 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new EngineError('INVALID_PORT', '端口无效');
   if (![controlToken, mcpToken].every(token => typeof token === 'string' && token.length > 0 && token.length <= 4096 && !/\s/.test(token)) || controlToken === mcpToken)
     throw new EngineError('INVALID_TOKENS', '需要两个独立访问令牌');
   if (!Number.isSafeInteger(maxSessions) || maxSessions < 1 || !Number.isSafeInteger(sessionTtlMs) || sessionTtlMs < 1)
     throw new EngineError('INVALID_SESSION_LIMIT', '会话限制无效');
+  if (remoteHost && (!isIP(remoteHost) || !identitiesFile || !auditFile))
+    throw new EngineError('INVALID_REMOTE_HOST', '远程 MCP 需要合法 IP 和用户认证配置');
+  let remoteAuthority = remoteHost && `${remoteHost.includes(':') ? `[${remoteHost}]` : remoteHost}:${port}`;
   const diagnostics = new Diagnostics();
   const auth = new AuthQueue(authOptions), pool = new ConnectionPool(auth, { ...poolOptions, diagnostics }), sessions = new Map();
   let stopping = false, closePromise, updates = Promise.resolve(), pendingSessions = 0;
@@ -76,7 +80,13 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, ident
         return;
       }
       const remote = request.socket.remoteAddress;
-      if (!['127.0.0.1', '::ffff:127.0.0.1'].includes(remote) || !loopbackAuthority(request.headers.host ?? '') || !validOrigin(request.headers.origin)) {
+      const localRequest = ['127.0.0.1', '::ffff:127.0.0.1'].includes(remote)
+        && loopbackAuthority(request.headers.host ?? '') && validOrigin(request.headers.origin);
+      const remoteMcp = remoteHost && request.url?.split('?')[0] === '/mcp'
+        && (request.headers.host === remoteAuthority || loopbackAuthority(request.headers.host ?? ''))
+        && (request.headers.origin === undefined || validOrigin(request.headers.origin)
+          || ['http', 'https'].some(scheme => request.headers.origin === `${scheme}://${remoteAuthority}`));
+      if (!localRequest && !remoteMcp) {
         json(response, 403, { error: '仅允许本机请求' });
         return;
       }
@@ -276,7 +286,7 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, ident
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject);
-      server.listen(port, '127.0.0.1', resolve);
+      server.listen(port, remoteHost ? (isIP(remoteHost) === 6 ? '::' : '0.0.0.0') : '127.0.0.1', resolve);
     });
   }
   catch (error) {
@@ -286,6 +296,7 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, ident
     throw new EngineError('LISTEN_FAILED', '服务端口不可用', 503);
   }
   engine.address = server.address();
+  if (remoteHost) remoteAuthority = `${remoteHost.includes(':') ? `[${remoteHost}]` : remoteHost}:${engine.address.port}`;
   engine.url = 'http://127.0.0.1:' + engine.address.port;
   diagnostics.record('engine_ready');
   return engine;

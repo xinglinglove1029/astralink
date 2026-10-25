@@ -53,8 +53,16 @@ export function mcpEndpoint(port: number, host = '127.0.0.1'): string {
   return `http://${address}:${port}/mcp`
 }
 
-export function createClientSnippet(client: ClientId, port: number, bridgePaths?: { nodePath: string; scriptPath: string }, host = '127.0.0.1'): string | null {
+export function createClientSnippet(client: ClientId, port: number, bridgePaths?: { nodePath: string; scriptPath: string }, host = '127.0.0.1', mode: 'desktop' | 'server' = 'desktop'): string | null {
   const url = mcpEndpoint(port, host)
+  if (mode === 'server') {
+    if (client === 'workbuddy') return pretty({ mcpServers: { astralink: { type: 'http', url, headers: header } } })
+    if (client === 'cherry-studio') return pretty({ mcpServers: { astralink: { type: 'streamableHttp', url, headers: header } } })
+    if (client === 'claude-desktop') return pretty({ mcpServers: { astralink: {
+      command: 'npx', args: ['-y', 'mcp-remote', url, '--allow-http', '--header', 'Authorization:${AUTH_HEADER}'],
+      env: { AUTH_HEADER: 'Bearer ' + token },
+    } } })
+  }
   switch (client) {
     case 'claude-code': return pretty({ mcpServers: { astralink: { type: 'http', url, headers: header } } })
     case 'codex': return '[mcp_servers.astralink]\nenabled = true\nurl = "' + url + '"\n\n[mcp_servers.astralink.http_headers]\nAuthorization = "Bearer ' + token + '"'

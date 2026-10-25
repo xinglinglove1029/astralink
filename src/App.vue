@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyText } from './clipboard'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { activeBridge } from './api'
 import { webMode, checkWebAuth, loginWeb, logoutWeb, currentWebUser } from './webBridge'
@@ -93,7 +94,7 @@ async function remove() {
 }
 async function copyEndpoint() {
   if (!state.desktop || !state.engine.running || !state.engine.endpoint) return
-  try { await navigator.clipboard.writeText(state.engine.endpoint); copied.value = true; copyTimer = setTimeout(() => { copied.value = false }, 1800) }
+  try { await copyText(state.engine.endpoint); copied.value = true; copyTimer = setTimeout(() => { copied.value = false }, 1800) }
   catch { dock.report('复制失败，请手动复制服务地址') }
 }
 async function checkUpdates() {

@@ -876,6 +876,7 @@ pub async fn run(
     paths: engine::RuntimePaths,
 ) -> Result<(), String> {
     let client_host = std::env::var_os("ASTRALINK_MCP_CLIENT_HOST")
+        .or_else(|| std::env::var_os("ASTRALINK_MCP_REMOTE_HOST"))
         .map(|value| {
             value
                 .into_string()

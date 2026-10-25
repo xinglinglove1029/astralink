@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyText } from '../clipboard'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { activeBridge, desktopBridge } from '../api'
 import { webMode, currentWebUser } from '../webBridge'
@@ -6,6 +7,7 @@ import { clientGuides, copyAccessToken, createClientSnippet, mcpEndpoint } from 
 import type { ClientId } from '../clientConfigs'
 import type { AstraLinkController } from '../controller'
 import Icon from './Icon.vue'
+import Modal from './Modal.vue'
 
 const props = defineProps<{ dock: AstraLinkController }>()
 const { state } = props.dock
@@ -17,7 +19,7 @@ const sshUser = ref('')
 const sshHost = ref('')
 const localPort = computed(() => webMode && webConnection.value === 'tunnel' ? forwardPort.value : state.settings.mcpPort)
 const clientHost = computed(() => webMode && webConnection.value === 'same' ? state.mcpClientHost || '127.0.0.1' : '127.0.0.1')
-const webHttpClient = computed(() => !['claude-desktop', 'workbuddy', 'cherry-studio', 'chatgpt'].includes(selected.value))
+const webHttpClient = computed(() => selected.value !== 'chatgpt')
 const tunnelCommand = computed(() => `ssh -N -L 127.0.0.1:${forwardPort.value}:127.0.0.1:${state.settings.mcpPort} ${sshUser.value}@${sshHost.value}`)
 const tunnelValid = computed(() => Number.isInteger(forwardPort.value) && forwardPort.value >= 1024 && forwardPort.value <= 65535 && /^[a-zA-Z0-9._-]+$/.test(sshUser.value) && /^[a-zA-Z0-9._-]+$/.test(sshHost.value))
 const bridgePaths = ref<{ nodePath: string; scriptPath: string }>()
@@ -26,11 +28,14 @@ watch(() => state.desktop && state.ready, async (ready) => {
   try { bridgePaths.value = await desktopBridge.invoke('get_mcp_bridge_paths', {}) }
   catch { bridgePaths.value = undefined }
 }, { immediate: true })
-const snippet = computed(() => webMode && (!webHttpClient.value || !Number.isInteger(localPort.value) || localPort.value < 1024 || localPort.value > 65535) ? null : createClientSnippet(selected.value, localPort.value, bridgePaths.value, clientHost.value))
+const snippet = computed(() => webMode && (!webHttpClient.value || !Number.isInteger(localPort.value) || localPort.value < 1024 || localPort.value > 65535) ? null : createClientSnippet(selected.value, localPort.value, bridgePaths.value, clientHost.value, webMode ? 'server' : 'desktop'))
 const endpoint = computed(() => Number.isInteger(localPort.value) && localPort.value >= 1024 && localPort.value <= 65535 ? mcpEndpoint(localPort.value, clientHost.value) : '请输入有效的客户端端口')
 const registration = computed(() => state.clientRegistrations[selected.value])
 const setupBusy = computed(() => !state.desktop || !state.ready || !state.engine.running || state.engineBusy || state.registrationBusy || !!state.mutation)
 const busy = ref(false)
+const tokenDialog = ref(false)
+const personalToken = ref('')
+const tokenError = ref('')
 async function configure(pick = false) {
   if (webMode || setupBusy.value) return
   const client = selected.value
@@ -52,26 +57,39 @@ function notify(message: string) {
 async function copySnippet() {
   if (!snippet.value) return
   try {
-    await navigator.clipboard.writeText(snippet.value)
+    await copyText(snippet.value)
     notify('配置片段已复制')
   } catch { notify('复制失败，请手动选择配置片段') }
 }
 async function copyToken() {
   if (!state.desktop || !state.ready || busy.value) return
-  if (webMode && !window.confirm('生成新的个人 MCP 令牌？之前的令牌将立即失效，请同步更新客户端配置。')) return
+  if (webMode) { tokenError.value = ''; personalToken.value = ''; tokenDialog.value = true; return }
   busy.value = true
   try {
     await copyAccessToken(
       () => activeBridge.invoke('get_mcp_token', {}),
-      (value) => navigator.clipboard.writeText(value),
+      (value) => copyText(value),
     )
     notify('访问令牌已复制，请粘贴到目标客户端')
   } catch { notify('复制令牌失败，请检查服务状态和剪贴板权限') }
   finally { busy.value = false }
 }
+function closeTokenDialog() { if (!busy.value) { personalToken.value = ''; tokenDialog.value = false } }
+async function generateToken() {
+  if (busy.value || personalToken.value) return
+  busy.value = true; tokenError.value = ''
+  try { personalToken.value = await activeBridge.invoke('get_mcp_token', {}) }
+  catch { tokenError.value = '签发失败，请检查当前账号和服务状态' }
+  finally { busy.value = false }
+}
+async function copyPersonalToken() {
+  tokenError.value = ''
+  try { await copyText(personalToken.value); notify('个人令牌已复制') }
+  catch { tokenError.value = '复制失败，请选中令牌手动复制' }
+}
 async function copyTunnel() {
   if (!tunnelValid.value) return
-  try { await navigator.clipboard.writeText(tunnelCommand.value); notify('SSH 隧道命令已复制') }
+  try { await copyText(tunnelCommand.value); notify('SSH 隧道命令已复制') }
   catch { notify('复制失败，请手动选择命令') }
 }
 onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
@@ -89,14 +107,14 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
       <div class="connection-modes" role="group" aria-label="客户端位置"><button type="button" :aria-pressed="webConnection === 'same'" :class="{ active: webConnection === 'same' }" @click="webConnection = 'same'">{{ state.mcpClientHost === '127.0.0.1' ? '与服务同机' : '指定地址' }}</button><button type="button" :aria-pressed="webConnection === 'tunnel'" :class="{ active: webConnection === 'tunnel' }" @click="webConnection = 'tunnel'">远程 SSH 隧道</button></div>
       <div v-if="webConnection === 'tunnel'" class="tunnel-fields"><label class="field"><span>SSH 用户名</span><input v-model.trim="sshUser" autocomplete="off" placeholder="ops" /></label><label class="field"><span>SSH 主机</span><input v-model.trim="sshHost" autocomplete="off" placeholder="server.example.com" /></label><label class="field"><span>客户端本地端口</span><input v-model.number="forwardPort" type="number" min="1024" max="65535" /></label></div>
       <div v-if="webConnection === 'tunnel'" class="tunnel-command"><code class="mono">{{ tunnelValid ? tunnelCommand : '填写 SSH 账号、主机和客户端本地端口' }}</code><button type="button" class="icon-button" title="复制 SSH 隧道命令" aria-label="复制 SSH 隧道命令" :disabled="!tunnelValid" @click="copyTunnel"><Icon name="copy" :size="16" /></button></div>
-      <p class="client-caution">SSH 隧道需保持运行；MCP 不通过管理页的登录会话访问，也不会自动向公网开放。指定客户端 IP 只改变配置片段，不会开放容器里的 MCP 端口。</p>
+      <p class="client-caution">远程直连需在容器设置 ASTRALINK_MCP_REMOTE_HOST 为服务器 IP，并映射 MCP 端口；仅修改展示 IP 不会开放端口。Docker 部署的 SSH 隧道也需要先把 MCP 端口映射到宿主机回环地址。</p>
     </div>
     <div class="endpoint-line"><span>{{ webMode ? '客户端使用的 MCP 地址' : '本机 MCP 地址' }}</span><code class="mono">{{ endpoint }}</code></div>
     <div class="client-tabs" role="tablist" aria-label="AI 客户端">
       <button v-for="item in clientGuides" :id="'client-tab-' + item.id" :key="item.id" type="button" role="tab"
         :aria-selected="selected === item.id" :tabindex="selected === item.id ? 0 : -1"
         aria-controls="client-config-panel" :class="{ selected: selected === item.id }" @click="selected = item.id">
-        {{ item.name }}<span v-if="webMode && ['claude-desktop', 'workbuddy', 'cherry-studio'].includes(item.id)" class="client-tab-limited">需本机桥接</span><span v-else-if="!item.supported" class="client-tab-limited" title="需要公网 HTTPS 网关">需远程网关</span>
+        {{ item.name }}<span v-if="webMode && item.id === 'claude-desktop'" class="client-tab-limited">需 Node 桥接</span><span v-else-if="!item.supported" class="client-tab-limited" title="需要公网 HTTPS 网关">需远程网关</span>
       </button>
     </div>
     <div id="client-config-panel" class="client-panel" role="tabpanel" :aria-labelledby="'client-tab-' + selected">
@@ -111,16 +129,24 @@ onUnmounted(() => { if (feedbackTimer) clearTimeout(feedbackTimer) })
         <div v-if="registration" class="registration-result" role="status"><strong><Icon name="check" :size="15" />{{ registration.reloadRequired ? '配置已更新' : '配置已是最新' }}</strong><p class="mono break-text">{{ registration.configPath }}</p><small v-if="registration.backupPath">备份：{{ registration.backupPath }}</small><p v-if="registration.reloadRequired">请重新加载 {{ guide.name }} 的 MCP 配置。</p></div>
       </div>
       <ol v-if="!webMode" class="client-steps"><li v-for="step in guide.steps" :key="step">{{ step }}</li></ol>
-      <ol v-else-if="webHttpClient" class="client-steps"><li>{{ webConnection === 'tunnel' ? '先在运行 MCP 客户端的电脑上建立上方 SSH 隧道。' : clientHost === '127.0.0.1' ? '在运行 AstraLink 的服务器上启动 MCP 客户端。' : '先确认指定 IP 上的受保护 MCP 转发入口可从客户端访问。' }}</li><li>将下方片段并入该客户端配置，再单独填写 MCP 访问令牌。</li></ol>
-      <p v-else class="client-caution">{{ selected === 'chatgpt' ? '云端客户端不能直接使用服务器回环地址；需要单独部署受保护的 HTTPS MCP 网关。' : '此客户端当前使用本机 stdio 桥接；请在安装了 AstraLink 桌面版的电脑上完成接入。服务器上的 Node 路径不能用于你的电脑。' }}</p>
+      <ol v-else-if="webHttpClient" class="client-steps"><li>{{ webConnection === 'tunnel' ? '先在运行 MCP 客户端的电脑上建立上方 SSH 隧道。' : clientHost === '127.0.0.1' ? '在运行 AstraLink 的服务器上启动 MCP 客户端。' : '先确认指定 IP 上的受保护 MCP 转发入口可从客户端访问。' }}</li><li>将下方片段并入该客户端配置，再单独填写个人 MCP 访问令牌。WorkBuddy、Cherry Studio 的 HTTP 接入不需要安装 AstraLink 桌面版。</li></ol>
+      <p v-if="webMode && selected === 'claude-desktop'" class="client-caution">此片段在运行 Claude Desktop 的电脑上使用 Node.js / npx 和 mcp-remote 桥接，不需要安装 AstraLink 桌面版。首次使用会下载桥接包。</p>
+      <p v-if="webMode && selected === 'cherry-studio'" class="client-caution">在 Cherry Studio 的 MCP 设置中选择 Streamable HTTP，填写上述 URL，并添加 Authorization 请求头。若版本不接受 JSON 导入字段，请按界面手动添加。</p>
+      <p v-if="webMode && selected === 'chatgpt'" class="client-caution">云端客户端不能直接使用服务器回环地址；需要单独部署受保护的 HTTPS MCP 网关。</p>
       <div v-if="snippet" class="client-code-wrap"><pre class="client-code mono"><code>{{ snippet }}</code></pre></div>
       <div v-else-if="!webMode" class="client-unavailable"><Icon name="info" :size="18" /><span>本机服务不能直接连接云端 ChatGPT。</span></div>
       <p v-if="!webMode && guide.caution" class="client-caution"><Icon name="alert" :size="15" />{{ guide.caution }}</p>
       <div v-if="!webMode || webHttpClient" class="client-verify"><Icon name="check" :size="15" /><span>{{ guide.verify }}</span></div>
     </div>
     <div v-if="guide.supported && (!webMode || webHttpClient)" class="client-token-row"><span><strong>访问令牌</strong><small>片段仅含占位符。令牌不在页面显示；复制后请不要粘贴到公开文件或聊天中。</small></span>
-      <button type="button" class="button secondary" :disabled="!state.desktop || !state.ready || busy || (webMode && currentWebUser?.role === 'viewer')" title="生成并复制个人 MCP 访问令牌" @click="copyToken"><Icon name="key" :size="15" />{{ busy ? '生成中…' : webMode ? '生成个人令牌' : '复制令牌' }}</button>
+      <button type="button" class="button secondary" :disabled="!state.desktop || !state.ready || busy || (webMode && currentWebUser?.role === 'viewer')" title="生成个人 MCP 访问令牌" @click="copyToken"><Icon name="key" :size="15" />{{ busy ? '生成中…' : webMode ? '生成个人令牌' : '复制令牌' }}</button>
     </div>
+    <Modal v-if="tokenDialog" title="个人 MCP 令牌" :busy="busy" @close="closeTokenDialog">
+      <p class="client-caution">{{ personalToken ? '令牌仅显示这一次。关闭前请复制保存。' : '生成新令牌后，旧令牌将立即失效，请更新客户端配置。' }}</p>
+      <label v-if="personalToken" class="field"><span>访问令牌</span><input :value="personalToken" readonly autocomplete="off" @focus="($event.target as HTMLInputElement).select()" /></label>
+      <p v-if="tokenError" class="field-error" role="alert">{{ tokenError }}</p>
+      <template #footer><button class="button secondary" :disabled="busy" @click="closeTokenDialog">{{ personalToken ? '完成' : '取消' }}</button><button class="button primary" :disabled="busy" @click="personalToken ? copyPersonalToken() : generateToken()">{{ busy ? '生成中…' : personalToken ? '复制令牌' : '确认生成' }}</button></template>
+    </Modal>
     <p v-if="feedback" class="client-feedback" role="status" aria-live="polite">{{ feedback }}</p>
   </section>
 </template>

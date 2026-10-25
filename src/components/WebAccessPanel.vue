@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { copyText } from '../clipboard'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { currentWebUser, webManagement, type WebUser } from '../webBridge'
 import { webRoleName, type WebRole } from '../webRoles'
@@ -94,7 +95,8 @@ async function issueToken() {
 }
 async function copyToken() {
   if (!issuedToken.value) return
-  try { await navigator.clipboard.writeText(issuedToken.value); tokenCopied.value = true }
+  error.value = ''
+  try { await copyText(issuedToken.value); tokenCopied.value = true }
   catch { error.value = '复制失败，请手动复制令牌' }
 }
 onMounted(refresh)
