@@ -29,6 +29,10 @@ ASTRALINK_DATA_DIR=/srv/astralink/data ASTRALINK_RESOURCE_DIR="$PWD" ASTRALINK_W
 
 仓库根目录的 `docker-compose.yml` 直接使用 Docker Hub 镜像，部署命令见 README。可选环境变量 `ASTRALINK_MCP_CLIENT_HOST=192.168.97.240` 只改变网页版客户端配置片段的展示地址。MCP 默认监听容器回环地址；下方“WorkBuddy / Cherry Studio”一节给出可信内网远程监听和端口映射方式。
 
+发布工作流为正式版本同时推送版本标签和 `latest`，预发布版本只推送版本标签。已有部署需要执行 `docker compose pull` 再执行 `docker compose up -d` 才会更新。
+
+拉取时若提示 `this image is not in the allowlist`，表示配置的第三方镜像加速源拒绝提供该镜像，需要使用能访问此仓库的镜像源或 Docker Hub 直连；这不是容器启动失败。若 Docker Hub 返回 `manifest unknown`，则检查镜像标签是否已发布。修改标签不会解决加速源的白名单限制。
+
 首次启动时密码至少 12 字符。已有完整数据卷时忽略启动密码，不会在容器重启或升级时重设；若仅存在管理员哈希或主密钥中的一个，服务会拒绝启动以保护已有数据。没有密码且未初始化时会明确报错。
 
 密码作为环境变量会出现在 Docker 容器元数据及 Compose 配置输出中，只有具有主机或 Docker 管理权限的人应能读取它；不要提交带真实密码的 Compose 文件。首次初始化后可将密码项清空并重新创建容器，已有数据卷不会重置。手动删除数据卷会丢失连接及凭据，不要通过删卷来重设密码。

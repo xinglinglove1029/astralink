@@ -27,7 +27,7 @@ AstraLink 提供 SSH 连接管理和内置 MCP 服务，可安装桌面客户端
 name: astralink
 services:
   astralink:
-    image: xinglinglove1029/astralink:v0.1.9
+    image: xinglinglove1029/astralink:v0.1.10
     restart: unless-stopped
     ports:
       - "1421:1421"
@@ -38,6 +38,8 @@ services:
 volumes:
   astralink-data:
 ```
+
+从 `v0.1.10` 起，正式发布同时更新 `latest`。需要跟随正式版本时，可将上面的镜像标签改为 `latest`；预发布版本不更新它。
 
 在 `docker-compose.yml` 所在目录执行：
 
@@ -52,7 +54,7 @@ docker compose ps
 不使用 Compose 时，先拉取 Docker Hub 镜像，并创建持久卷：
 
 ```bash
-docker pull xinglinglove1029/astralink:v0.1.9
+docker pull xinglinglove1029/astralink:v0.1.10
 docker volume create astralink-data
 read -rsp '设置管理员密码（至少 12 个字符）: ' ASTRALINK_ADMIN_PASSWORD; printf '\n'
 export ASTRALINK_ADMIN_PASSWORD
@@ -60,7 +62,7 @@ docker run -d --name astralink --restart unless-stopped \
   -p 1421:1421 \
   -v astralink-data:/var/lib/astralink \
   -e ASTRALINK_ADMIN_PASSWORD \
-  xinglinglove1029/astralink:v0.1.9
+  xinglinglove1029/astralink:v0.1.10
 unset ASTRALINK_ADMIN_PASSWORD
 docker ps --filter name=astralink
 ```

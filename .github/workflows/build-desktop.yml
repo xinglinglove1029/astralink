@@ -151,11 +151,20 @@ jobs:
           file: Dockerfile.server
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.dockerhub.outputs.image }}:${{ github.ref_name }}
+          tags: |
+            ${{ steps.dockerhub.outputs.image }}:${{ github.ref_name }}
+            ${{ !contains(github.ref_name, '-') && format('{0}:latest', steps.dockerhub.outputs.image) || '' }}
           provenance: false
       - name: Record image
         if: steps.dockerhub.outputs.configured == 'true'
-        run: echo 'Published `${{ steps.dockerhub.outputs.image }}:${{ github.ref_name }}` (linux/amd64).' >> "$GITHUB_STEP_SUMMARY"
+        env:
+          IMAGE: ${{ steps.dockerhub.outputs.image }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          echo "Published \`$IMAGE:$RELEASE_TAG\` (linux/amd64)." >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$RELEASE_TAG" != *-* ]]; then
+            echo "Updated \`$IMAGE:latest\`." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   release:
     name: Publish release
