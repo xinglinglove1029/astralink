@@ -1,0 +1,54 @@
+{
+  "fixtureVersion": 1,
+  "password": "synthetic-backup-password",
+  "expectedSecret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+  "legacy": {
+    "entry": {
+      "type": "totp",
+      "issuer": "JumpServer",
+      "account": "synthetic-legacy",
+      "encrypted": true,
+      "secret": "U2FsdGVkX18RCP31XVylAaeho9hiPOPdr44+hWfgzXVxfaHkPylfD16y9DSwwlKEOKhFD5tn02/Ik8QbzXABCw=="
+    }
+  },
+  "modern": {
+    "fixture-key": {
+      "dataType": "Key",
+      "id": "fixture-key",
+      "salt": "fixture-salt-1234",
+      "hash": "$argon2id$v=19$m=19456,t=2,p=1$dmVyaWZ5LXNhbHQtMTIzNA$Wzryef3E2n+z/8F1sF9UMBq3fXT77lk58AO+1Hw378k"
+    },
+    "entry": {
+      "dataType": "EncOTPStorage",
+      "keyId": "fixture-key",
+      "data": "U2FsdGVkX1+TU75VqvKm691i/YAdCveXtpZQ8KSAfUGzHnBQIUJZsqzFDkuBz2TI95GioLTTaCJxjxQkhQ1WcXWVwlnV4Nw4WF1NqgrE8bLA4UFjBeyrU5LmgywR+kEVL5h53NqklhFpm9jraoKlXt8sHhLQFh+qFia4naAlc1k="
+    }
+  },
+  "modernSecret": {
+    "fixture-key": {
+      "dataType": "Key",
+      "id": "fixture-key",
+      "salt": "fixture-salt-1234",
+      "hash": "$argon2id$v=19$m=19456,t=2,p=1$dmVyaWZ5LXNhbHQtMTIzNA$Wzryef3E2n+z/8F1sF9UMBq3fXT77lk58AO+1Hw378k"
+    },
+    "entry": {
+      "type": "totp",
+      "account": "synthetic-keyed-secret",
+      "encrypted": true,
+      "keyId": "fixture-key",
+      "secret": "U2FsdGVkX1903tQvAZcXMSxy+fAcLNuLD+8N4KsKqOoYEQA2vfCFz8Fo5dWTx+5qAeN+rHxlVErURY0gpbnmrg=="
+    }
+  },
+  "oldKey": {
+    "key": {
+      "enc": "U2FsdGVkX1/1Cei6+gItIDsz40gC4dCi3Rzq8jY8ZwMQAidZgNTTxb3D+Dkd6Clj",
+      "hash": "$argon2id$v=19$m=19456,t=2,p=1$b2xkLXZlcmlmeS1zYWx0LTEyMw$cAhU07oBIIsbj6ljYInQYHje31gXfgmHokFcJ4xYg54"
+    },
+    "entry": {
+      "type": "totp",
+      "account": "synthetic-old-key",
+      "encrypted": true,
+      "secret": "U2FsdGVkX18CkKHCEu8U9naU1L9rtNlxypUGfYxuMKkJhUeN+eg1lmsyoszrVl1UAAKrV7bApLA5yEHPZUMkGw=="
+    }
+  }
+}

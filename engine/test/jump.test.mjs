@@ -41,3 +41,23 @@ test('multiple unknown auth prompts are rejected explicitly rather than guessed'
   assert.equal(auth.events(0).cursor, 0);
   auth.close();
 });
+
+test('fresh JumpServer asset login automatically answers OTP and executes a command', async t => {
+  const seed = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  const now = 1_700_000_010_000;
+  const { totp } = await feature('totp');
+  const code = totp(seed,now).code;
+  const ssh = await fakeSsh({ code, prompts:[{prompt:'[OTP Code]: ',echo:true}] });
+  t.after(()=>ssh.close());
+  const {createEngine}=await feature('engine');
+  const engine=await createEngine({...tokens,port:0,poolOptions:{now:()=>now}});
+  t.after(()=>engine.close());
+  const p=profile({port:ssh.port,username:'platform',targetHost:'asset',targetUsername:'root',totpSecret:seed,hasTotpSecret:true});
+  await request(engine,'/control/profiles',{profiles:[p]});
+  const result=await request(engine,'/control/test',{profileId:p.id});
+  assert.equal(result.body.status,'connected');
+  assert.deepEqual(ssh.seen.responses,[[code]]);
+  assert.ok(ssh.seen.usernames.every(name=>name==='platform@root@asset'));
+  assert.deepEqual(ssh.seen.commands,['hostname && id']);
+  assert.equal((await request(engine,'/control/events')).body.events.length,0);
+});

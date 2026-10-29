@@ -142,21 +142,22 @@ test('explicit JumpServer OTP prompt auto-answers even when the server sets echo
   const traceIds = new Set(logs.filter(entry => entry.profileId === p.id).map(entry => entry.requestId));
   assert.equal(traceIds.size, 1);
 });
-test('a TOTP timestep is submitted at most once per profile and unrecognized prompts stay manual', async (t) => {
+test('reconnecting with the same seed waits for a new OTP without manual input', async (t) => {
   const seed = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
-  const fixedNow = 1_700_000_010_000;
+  let fixedNow = 1_700_000_010_000;
   const { totp } = await feature('totp');
   const expected = totp(seed, fixedNow).code;
-  const { engine, p, ssh } = await setup(t, { code: expected }, { poolOptions: { now: () => fixedNow } });
+  const future = totp(seed, fixedNow + 30000).code;
+  const { engine, p, ssh } = await setup(t, { codes: [expected,future] }, { poolOptions: { now: () => fixedNow, sleep: async ms => { fixedNow += ms; } } });
   await request(engine, '/control/profiles', { profiles: [{ ...p, totpSecret: seed, hasTotpSecret: true }] });
   assert.equal((await request(engine, '/control/test', { profileId: p.id })).body.status, 'connected');
   await request(engine, '/control/profiles', { profiles: [{ ...p, username: 'tester2', totpSecret: seed, hasTotpSecret: true }] });
   const pending = request(engine, '/control/test', { profileId: p.id });
-  const event = await eventually(async () => (await request(engine, '/control/events')).body.events[0]);
-  assert.equal(event.prompts[0].prompt, 'Verification code: ');
-  await request(engine, '/control/auth', { requestId: event.requestId, code: expected });
   assert.equal((await pending).body.status, 'connected');
-  assert.deepEqual(ssh.seen.responses, [[expected], [expected]]);
+  const next = totp(seed, fixedNow).code;
+  assert.deepEqual(ssh.seen.responses, [[expected], [next]]);
+  assert.notEqual(next, expected);
+  assert.equal((await request(engine, '/control/events')).body.events.length, 0);
 });
 test('unrecognized interactive prompts are never answered from a saved TOTP seed', async (t) => {
   const seed = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
@@ -176,23 +177,51 @@ test('echoed non-OTP prompts remain manual even with a saved TOTP seed', async (
   const pending = request(engine, '/control/test', { profileId: p.id });
   const challenge = await eventually(async () => (await request(engine, '/control/events')).body.events[0]);
   assert.deepEqual(challenge.prompts, [{ prompt: 'Security response:', echo: true }]);
-  assert.equal(engine.pool.usedTotpSteps.has(p.id), false);
+  assert.equal(engine.pool.totp.used.size, 0);
   await request(engine, '/control/auth', { requestId: challenge.requestId, code: 'manual-response' });
   assert.equal((await pending).body.status, 'connected');
   assert.deepEqual(ssh.seen.responses, [['manual-response']]);
 });
-test('TOTP challenge within the final five seconds falls back to manual entry', async (t) => {
+test('TOTP challenge within the final five seconds automatically waits then logs in', async (t) => {
   const seed = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
-  const fixedNow = 1_700_000_036_000;
-  const { engine, p, ssh } = await setup(t, { code: 'manual-code' }, { poolOptions: { now: () => fixedNow } });
+  let fixedNow = 1_700_000_036_000;
+  const { totp } = await feature('totp');
+  const expected = totp(seed, fixedNow + totp(seed, fixedNow).remainingMs + 50).code;
+  const { engine, p, ssh } = await setup(t, { code: expected }, { poolOptions: { now: () => fixedNow, sleep: async ms => { fixedNow += ms; } } });
   await request(engine, '/control/profiles', { profiles: [{ ...p, totpSecret: seed, hasTotpSecret: true }] });
   const pending = request(engine, '/control/test', { profileId: p.id });
-  const event = await eventually(async () => (await request(engine, '/control/events')).body.events[0]);
-  await request(engine, '/control/auth', { requestId: event.requestId, code: 'manual-code' });
   assert.equal((await pending).body.status, 'connected');
-  assert.deepEqual(ssh.seen.responses, [['manual-code']]);
+  assert.deepEqual(ssh.seen.responses, [[expected]]);
+  assert.equal((await request(engine, '/control/events')).body.events.length, 0);
   assert.ok(engine.diagnostics.since(0).entries.some(entry => entry.code === 'otp_near_expiry'));
   assert.equal(JSON.stringify(engine.diagnostics.since(0)).includes('manual-code'), false);
+});
+
+test('different asset profiles sharing one OTP seed reserve distinct timesteps', async t => {
+  const seed='GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  const {totp}=await feature('totp');
+  let now=1_700_000_010_000;
+  const codes=[totp(seed,now).code,totp(seed,now+30000).code];
+  const {engine,p,ssh}=await setup(t,{codes},{poolOptions:{now:()=>now,sleep:async ms=>{now+=ms;}}});
+  const first={...p,totpSecret:seed,hasTotpSecret:true};
+  const second={...first,id:'22222222-2222-4222-8222-222222222222',name:'another-asset'};
+  await request(engine,'/control/profiles',{profiles:[first,second]});
+  const results=await Promise.all([first,second].map(p=>request(engine,'/control/test',{profileId:p.id})));
+  assert.ok(results.every(result=>result.body.status==='connected'));
+  assert.equal(new Set(ssh.seen.responses.map(response=>response[0])).size,2);
+  assert.equal((await request(engine,'/control/events')).body.events.length,0);
+});
+
+test('retiring a profile aborts an OTP rollover wait without submitting a late code', async t => {
+  const seed='GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  const {engine,p,ssh}=await setup(t,{}, {poolOptions:{now:()=>58_000}});
+  await request(engine,'/control/profiles',{profiles:[{...p,totpSecret:seed,hasTotpSecret:true}]});
+  const pending=request(engine,'/control/test',{profileId:p.id});
+  await eventually(()=>engine.diagnostics.since(0).entries.some(entry=>entry.code==='otp_near_expiry'));
+  await request(engine,'/control/profiles',{profiles:[]});
+  await pending;
+  assert.deepEqual(ssh.seen.responses,[]);
+  assert.equal(engine.pool.totp.used.size,0);
 });
 
 for (const closeMenu of [true, false]) {

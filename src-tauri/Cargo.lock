@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "astralink"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -118,6 +118,7 @@ dependencies = [
  "csv",
  "encoding_rs",
  "keyring",
+ "md-5",
  "pbkdf2",
  "quick-xml",
  "rand 0.9.5",
@@ -2558,6 +2559,16 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
 
 [[package]]
 name = "memchr"

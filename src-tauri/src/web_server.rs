@@ -564,6 +564,11 @@ async fn command(
             "get_auth_challenges" => Ok(json!(core.engine.pending_challenges().await)),
             "discover_sources" => Ok(json!([])),
             "reveal_profile_secret" => Ok(json!(core.store()?.read_secret(arg(&args, "profileId")?, arg(&args, "field")?)?)),
+            "read_authenticator_backup" => Ok(json!(crate::authenticator::read_authenticator_backup(
+                arg(&args,"content")?.to_owned(),
+                args.get("password").and_then(Value::as_str).map(str::to_owned),
+                args.get("entryId").and_then(Value::as_str).map(str::to_owned),
+            ).await?)),
             "get_mcp_token" => Ok(json!(state.access.issue_token(&user.id)?)),
             "preview_import" => {
                 let kind = arg(&args, "sourceKind")?;
@@ -1444,6 +1449,8 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         assert!(!directory.path().join("keys").exists());
+        assert_eq!(command(State(state.clone()), RoutePath("read_authenticator_backup".into()), headers.clone(),
+            Json(json!({"content":"otpauth://totp/Test:alice?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}))).await.status(), StatusCode::FORBIDDEN);
         assert_eq!(
             backup_preview(State(state.clone()), headers.clone(), Json(json!({})))
                 .await
@@ -1470,6 +1477,13 @@ mod tests {
         );
         let csrf = state.session(&headers).unwrap().0.csrf;
         headers.insert("x-astralink-csrf", HeaderValue::from_str(&csrf).unwrap());
+        let imported = command(State(state.clone()), RoutePath("read_authenticator_backup".into()), headers.clone(),
+            Json(json!({"content":"otpauth://totp/Test:alice?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}))).await;
+        assert_eq!(imported.status(), StatusCode::OK);
+        let preview_bytes = axum::body::to_bytes(imported.into_body(), 4096)
+            .await
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&preview_bytes).contains("GEZDGNBV"));
         assert_eq!(
             command(
                 State(state.clone()),

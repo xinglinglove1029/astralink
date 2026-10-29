@@ -4,7 +4,7 @@ import ssh2 from 'ssh2';
 import { SSHConnectionManager, captureOperationSecrets } from './upstream.mjs';
 import { EngineError } from './errors.mjs';
 import { toSshConfig } from './profiles.mjs';
-import { totp } from './totp.mjs';
+import { TotpScheduler } from './totp-scheduler.mjs';
 function isJumpServerMenu(output) {
   const text = String(output ?? '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
   return /\bJumpServer\b/i.test(text) && /(?:^|[\r\n])\s*Opt>\s*(?:$|[\r\n])/i.test(text);
@@ -66,10 +66,10 @@ class Connection extends SSHConnectionManager {
     log('ssh_connecting');
     const controller = new AbortController(), signal = controller.signal;
     const authOwner = Symbol(profile.id);
-    const attempt = { controller, authPending: false };
+    const attempt = { controller, authPending: false, totpPending: false };
     this.attempts.add(attempt);
     this.sockets.add(client);
-    let releaseJump, forwardedSocket, rejectReady, finished = false, cleaned = false;
+    let releaseJump, forwardedSocket, rejectReady, finished = false, cleaned = false, automaticAnswers = 0;
     const cleanup = () => {
       if (cleaned)
         return;
@@ -189,17 +189,28 @@ class Connection extends SSHConnectionManager {
             answer(answers);
             return;
           }
-          if (profile.totpSecret && pendingIndexes.length === 1 && isTotpPrompt(prompts[pendingIndexes[0]])) {
-            const generated = totp(profile.totpSecret, this.pool.now());
-            if (generated.remainingMs >= 5000 && this.pool.usedTotpSteps.get(profile.id) !== generated.step) {
-              this.pool.usedTotpSteps.set(profile.id, generated.step);
+          const otpPrompt = prompts.some(isTotpPrompt);
+          if (profile.totpSecret && pendingIndexes.length === 1 && otpPrompt) {
+            if (++automaticAnswers > 2) {
+              controller.abort(new EngineError('AUTH_EXPIRED', '动态验证码被重复拒绝，请检查密钥和系统时间后重试'));
+              return;
+            }
+            attempt.totpPending = true;
+            void this.pool.totp.next(profile.totpSecret, { signal, onWait: log }).then(generated => {
+              if (signal.aborted || finished) return;
+              attempt.totpPending = false;
               answers[pendingIndexes[0]] = generated.code;
               log('otp_auto');
               answer(answers);
-              return;
-            }
-            log(generated.remainingMs < 5000 ? 'otp_near_expiry' : 'otp_step_used');
-          } else {
+            }, () => {
+              if (!signal.aborted && !finished)
+                controller.abort(new EngineError('AUTH_EXPIRED', '动态验证码等待失败，请检查系统时间后重试'));
+            }).catch(() => {
+              if (!signal.aborted && !finished)
+                controller.abort(new EngineError('SSH_AUTH_FAILED', '动态验证码提交失败'));
+            });
+            return;
+          } else if (!otpPrompt) {
             log(!profile.totpSecret ? 'otp_missing' : 'otp_prompt_unknown');
           }
           log('auth_manual');
@@ -273,14 +284,19 @@ class Connection extends SSHConnectionManager {
     this.configs = Object.create(null);
     this.profile = { id: this.profile.id };
   }
+  cancelPendingAuthentication() {
+    for (const attempt of this.attempts)
+      if (attempt.totpPending)
+        attempt.controller.abort(new EngineError('AUTH_CANCELLED', '连接配置已变更，认证已取消'));
+  }
 }
 export class ConnectionPool {
-  constructor(auth, { connectionTimeoutMs = 90000, now = Date.now, diagnostics } = {}) {
+  constructor(auth, { connectionTimeoutMs = 90000, now = Date.now, sleep, diagnostics } = {}) {
     this.auth = auth;
     this.diagnostics = diagnostics;
     this.timeoutMs = connectionTimeoutMs;
     this.now = now;
-    this.usedTotpSteps = new Map();
+    this.totp = new TotpScheduler({ now, sleep });
     this.entries = new Map();
     this.retired = new Set();
     this.profiles = new Map();
@@ -319,14 +335,12 @@ export class ConnectionPool {
     for (const [name, entry] of this.entries)
       if (next.get(name) !== entry) {
         entry.retired = true;
+        entry.manager.cancelPendingAuthentication();
         this.retired.add(entry);
         this.disposeRetired(entry);
       }
     this.entries = next;
     this.profiles = byId;
-    for (const profileId of this.usedTotpSteps.keys())
-      if (!byId.has(profileId))
-        this.usedTotpSteps.delete(profileId);
     return profiles.length;
   }
   disposeRetired(entry) {
@@ -429,6 +443,7 @@ export class ConnectionPool {
   }
   close() {
     this.stopped = true;
+    this.totp.close();
     for (const entry of [...this.entries.values(), ...this.retired])
       entry.manager.disconnect();
     this.entries.clear();

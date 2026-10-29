@@ -1,3 +1,4 @@
+pub mod authenticator;
 pub mod client_setup;
 pub mod cloud_backup;
 pub mod commands;
@@ -98,6 +99,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::apply_import,
             commands::upsert_profile,
             commands::reveal_profile_secret,
+            authenticator::read_authenticator_backup,
             commands::delete_profile,
             commands::delete_profiles,
             commands::update_settings,

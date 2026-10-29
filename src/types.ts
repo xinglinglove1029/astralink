@@ -56,6 +56,7 @@ export interface RuntimeLogEntry { id: number; timestamp: number; level: 'info' 
 export interface RuntimeLogSnapshot { entries: RuntimeLogEntry[]; logPath: string; error: string | null }
 export interface StorageInfo { backend: 'sqlite'; databasePath: string; legacyBackupPath: string | null; serverCount: number }
 export interface CommandMap {
+  read_authenticator_backup: { args: { content: string; password?: string; entryId?: string }; result: { accounts: { id: string; issuer: string; account: string; supported: boolean; reason: string | null }[]; secret?: string } }
   export_backup_file: { args: { filePath: string; passphrase: string }; result: void }
   preview_backup_file: { args: { filePath: string; passphrase: string }; result: { fingerprint: string; serverCount: number; settings?: AppSettings; needsAttention: number } }
   restore_backup_file: { args: { filePath: string; passphrase: string; expectedFingerprint: string; strategy: 'merge' | 'replace' }; result: ConnectionProfile[] }

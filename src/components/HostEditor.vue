@@ -3,6 +3,8 @@ import { computed, onUnmounted, reactive, ref } from 'vue'
 import Modal from './Modal.vue'
 import Icon from './Icon.vue'
 import SecretInput from './SecretInput.vue'
+import AuthenticatorImport from './AuthenticatorImport.vue'
+import { applyAuthenticatorSecret } from '../authenticatorImport'
 import { createProfile, normalizeProfile, stripSecrets, validateProfile } from '../domain'
 import { readTotpSecretFromImage } from '../totpQr'
 import { webMode } from '../webBridge'
@@ -19,6 +21,14 @@ const qrInput = ref<HTMLInputElement>()
 const qrBusy = ref(false)
 const qrMessage = ref('')
 const qrError = ref('')
+const authenticatorOpen = ref(false)
+function useAuthenticator(secret: string, label: string) {
+  Object.assign(form, applyAuthenticatorSecret(form, secret))
+  delete errors.value.totpSecret
+  qrError.value = ''
+  qrMessage.value = `已选择 ${label}，保存后启用自动验证`
+  authenticatorOpen.value = false
+}
 const groups = computed(() => [...new Set(props.profiles.map((profile) => profile.group).filter(Boolean))])
 function loadSaved(field: SecretField) {
   const id = props.profile?.id
@@ -60,7 +70,7 @@ function submit() {
 onUnmounted(() => { active = false; form.password = undefined; form.passphrase = undefined; form.totpSecret = undefined; qrMessage.value = ''; qrError.value = '' })
 </script>
 <template>
-  <Modal :title="profile ? '编辑服务器' : '添加服务器'" subtitle="保存连接信息，凭据交由系统凭据库管理。" :busy="busy || picking || qrBusy" wide @close="emit('close')">
+  <Modal :title="profile ? '编辑服务器' : '添加服务器'" subtitle="保存连接信息，凭据交由系统凭据库管理。" :busy="busy || picking || qrBusy" :inactive="authenticatorOpen" wide @close="emit('close')">
     <form id="profile-form" class="profile-form" novalidate @submit.prevent="submit">
       <fieldset :disabled="busy || qrBusy"><legend class="sr-only">服务器配置</legend>
         <div class="form-grid">
@@ -74,8 +84,19 @@ onUnmounted(() => { active = false; form.password = undefined; form.passphrase =
           <template v-if="form.authType === 'privateKey'"><label class="field span-two"><span>{{ webMode ? '服务器私钥路径' : '私钥路径' }} <b>*</b></span><div class="input-action"><input v-model="form.privateKeyPath" :placeholder="webMode ? '上传私钥或填写服务器绝对路径' : '选择本机私钥文件'" :aria-invalid="!!errors.privateKeyPath" /><button type="button" class="button secondary" :disabled="picking" @click="chooseKey"><Icon name="folder" :size="16" />{{ webMode ? '上传' : '选择' }}</button></div><small v-if="errors.privateKeyPath" class="field-error">{{ errors.privateKeyPath }}</small></label><label class="field span-two"><span>私钥口令</span><SecretInput v-model="form.passphrase" reveal-label="私钥口令" :load-saved="form.hasPassphrase ? loadSaved('passphrase') : undefined" :placeholder="form.hasPassphrase ? '已保存口令；留空保留' : '未加密私钥可留空'" autocomplete="new-password" /></label></template>
           <label v-if="form.authType === 'agent'" class="field span-two"><span>Agent 路径</span><input v-model="form.agent" placeholder="Pageant 或系统 Agent 管道路径" spellcheck="false" /><small v-if="errors.agent" class="field-error">{{ errors.agent }}</small></label>
         </div>
-        <label class="check-row"><input v-model="form.tryKeyboard" type="checkbox" /><span>启用交互认证<small>服务器请求验证码时弹窗输入</small></span></label>
-        <div v-if="form.tryKeyboard || form.hasTotpSecret" class="field totp-config"><span><label for="totp-secret">动态验证码密钥</label></span><div class="totp-input-row"><SecretInput id="totp-secret" v-model="form.totpSecret" reveal-label="动态验证码密钥" :load-saved="form.hasTotpSecret ? loadSaved('totpSecret') : undefined" autocomplete="new-password" spellcheck="false" :placeholder="form.hasTotpSecret ? '已保存密钥；留空保留' : 'Base32 密钥，可从认证器绑定信息获取'" :aria-invalid="!!errors.totpSecret" /><button type="button" class="button secondary" :disabled="qrBusy" @click="qrInput?.click()"><span v-if="qrBusy" class="spinner" /><Icon v-else name="scan" :size="15" />识别二维码</button><button v-if="form.hasTotpSecret" type="button" class="button secondary danger-text" :disabled="qrBusy" @click="form.totpSecret = ''; form.hasTotpSecret = false; qrMessage = ''">清除密钥</button></div><input ref="qrInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" aria-label="选择二维码图片" tabindex="-1" @change="readQr" /><small v-if="errors.totpSecret" class="field-error">{{ errors.totpSecret }}</small><small v-else-if="qrError" class="field-error" role="alert">{{ qrError }}</small><small v-else-if="qrMessage" class="field-success" role="status">{{ qrMessage }}</small><small v-else>识别后点击保存；密钥仅存于{{ webMode ? '服务器加密凭据库' : '系统凭据库' }}。</small></div>
+        <label class="check-row"><input v-model="form.tryKeyboard" type="checkbox" /><span>启用交互认证<small>已配置动态密钥时自动验证，其他认证提示手动输入</small></span></label>
+        <div v-if="form.tryKeyboard || form.hasTotpSecret" class="field totp-config">
+          <span><label for="totp-secret">动态验证码密钥</label></span>
+          <div class="totp-input-row">
+            <SecretInput id="totp-secret" v-model="form.totpSecret" reveal-label="动态验证码密钥" :load-saved="form.hasTotpSecret ? loadSaved('totpSecret') : undefined" autocomplete="new-password" spellcheck="false" :placeholder="form.hasTotpSecret ? '已保存密钥；留空保留' : 'Base32 密钥，可从认证器绑定信息获取'" :aria-invalid="!!errors.totpSecret" />
+            <button type="button" class="button secondary" :disabled="qrBusy" @click="authenticatorOpen = true"><Icon name="key" :size="15" />导入身份验证器</button>
+            <button type="button" class="button secondary" :disabled="qrBusy" @click="qrInput?.click()"><span v-if="qrBusy" class="spinner" /><Icon v-else name="scan" :size="15" />识别二维码</button>
+            <button v-if="form.hasTotpSecret" type="button" class="button secondary danger-text" :disabled="qrBusy" @click="form.totpSecret = ''; form.hasTotpSecret = false; qrMessage = ''">清除密钥</button>
+          </div>
+          <input ref="qrInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" aria-label="选择二维码图片" tabindex="-1" @change="readQr" />
+          <small v-if="errors.totpSecret" class="field-error">{{ errors.totpSecret }}</small><small v-else-if="qrError" class="field-error">{{ qrError }}</small><small v-else-if="qrMessage" class="field-success" role="status">{{ qrMessage }}</small>
+          <small v-else>导入或识别后点击保存；密钥仅存于{{ webMode ? '服务器加密凭据库' : '系统凭据库' }}。</small>
+        </div>
         <label class="check-row"><input v-model="form.enabled" type="checkbox" /><span>启用此连接<small>允许 MCP 访问这台服务器</small></span></label>
         <button type="button" class="advanced-toggle" :aria-expanded="advanced" @click="advanced = !advanced"><Icon :name="advanced ? 'chevronDown' : 'chevron'" :size="15" />高级配置</button>
         <div v-show="advanced" class="form-grid advanced-fields">
@@ -93,4 +114,5 @@ onUnmounted(() => { active = false; form.password = undefined; form.passphrase =
     </form>
     <template #footer><button class="button secondary" :disabled="busy || picking || qrBusy" @click="emit('close')">取消</button><button class="button primary" type="submit" form="profile-form" :disabled="busy || picking || qrBusy"><span v-if="busy" class="spinner" /><Icon v-else name="check" :size="16" />{{ busy ? '保存中…' : '保存服务器' }}</button></template>
   </Modal>
+  <AuthenticatorImport v-if="authenticatorOpen" @close="authenticatorOpen = false" @selected="useAuthenticator" />
 </template>

@@ -1,7 +1,7 @@
 [package]
 name = "astralink"
 default-run = "astralink"
-version = "0.1.11"
+version = "0.1.12"
 description = "AstraLink SSH connections and integrated MCP"
 authors = ["AstraLink contributors"]
 edition = "2021"
@@ -48,6 +48,7 @@ chacha20poly1305 = "0.10"
 sha2 = "0.10"
 axum = { version = "0.8", features = ["multipart"] }
 tower-http = { version = "0.6", features = ["fs"] }
+md-5 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", default-features = false, features = ["windows-native"] }
