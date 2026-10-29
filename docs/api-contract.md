@@ -69,6 +69,8 @@ Native file selection uses @tauri-apps/plugin-dialog open(). Events: astralink-a
 Start engine/src/main.mjs. Env: ASTRALINK_PORT (18766 default), ASTRALINK_CONTROL_TOKEN, ASTRALINK_MCP_TOKEN. Both tokens mandatory, never logged. Bind 127.0.0.1. Reject non-loopback Origins and use constant-time token validation.
 
 - /mcp: Streamable HTTP, bearer MCP token; retain all 10 upstream tools and their argument names, including execute-command/connectionName.
+- 协议会话空闲 30 分钟后清理（每 30 秒检查），请求会刷新空闲计时，正在执行的 POST 不因空闲超时关闭；引擎重启会清空内存会话。已认证但未知的会话 ID 在派发工具前返回 HTTP 404 `{error:'会话不存在',code:'SESSION_NOT_FOUND'}`。
+- 内置 stdio 桥接空闲时每 5 分钟发送一次 MCP ping；遇到明确的会话失效响应，会共享一次重新初始化并至多重发一次被拒绝的请求。兼容旧引擎的 `{error:'会话不存在'}` 响应。认证失败、普通 404、网络错误、超时及工具业务错误不重试；恢复不取消同一旧会话上仍在执行的其他调用。客户端取消或关闭后不再派发重试，关闭同时停止保活。直接 HTTP 接入的第三方客户端需自行实现过期后重新初始化。
 - GET /control/status: control bearer -> {running:true,version:'0.1.0',pid,endpoint}
 - POST /control/profiles: {profiles:RuntimeProfile[]} -> {count}; validate atomically and update incrementally, preserving unrelated connections.
 - POST /control/test: {profileId} -> ConnectionTest; readonly hostname/id command only. A successful SSH login followed by a failed command probe remains failed at stage command, with an explicit authentication-success detail. A confirmed JumpServer banner and Opt> asset menu reports partial at stage target and asks for targetHost/targetUsername in advanced settings; reaching the menu proves SSH authentication but not asset command access.

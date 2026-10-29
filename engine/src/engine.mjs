@@ -119,7 +119,7 @@ export async function createEngine({ port = 18766, controlToken, mcpToken, ident
         const id = request.headers['mcp-session-id'];
         let entry = id ? sessions.get(id) : undefined;
         if (id && !entry) {
-          json(response, 404, { error: '会话不存在' });
+          json(response, 404, { error: '会话不存在', code: 'SESSION_NOT_FOUND' });
           return;
         }
         if (entry && identitiesFile && entry.userId !== actor.id) {

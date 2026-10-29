@@ -1,5 +1,4 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { createSessionClient } from './session-client.mjs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -11,16 +10,13 @@ if (!Number.isInteger(port) || port < 1 || port > 65535 || !token || /[\r\n]/.te
   process.exit(1);
 }
 
-const client = new Client({ name: 'astralink-local-bridge', version: '0.1.1' });
-const remote = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
-  requestInit: { headers: { Authorization: `Bearer ${token}` } },
-});
+const client = createSessionClient({ url: `http://127.0.0.1:${port}/mcp`, token });
 const server = new Server({ name: 'astralink', version: '0.1.1' }, { capabilities: { tools: {} } });
-server.setRequestHandler(ListToolsRequestSchema, async () => client.listTools());
-server.setRequestHandler(CallToolRequestSchema, async (request) => client.callTool(request.params));
+server.setRequestHandler(ListToolsRequestSchema, (request, { signal }) => client.listTools(request.params, { signal }));
+server.setRequestHandler(CallToolRequestSchema, (request, { signal }) => client.callTool(request.params, { signal }));
 
 try {
-  await client.connect(remote);
+  await client.connect();
   await server.connect(new StdioServerTransport());
 } catch {
   console.error('AstraLink bridge could not connect to the local MCP service');
